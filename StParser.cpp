@@ -53,12 +53,16 @@ bool Parser::readFile()
 
 bool Parser::readClass()
 {
+    bool found = false;
     while( d_lex->peek().d_type != Lexer::EoC && d_lex->peek().isValid() )
     {
         if( !readClassExpr() )
             return false;
+        found = true;
     }
-    return true;
+    if( !found )
+        return error("invalid class format", d_lex->getLine() );
+    return found;
 }
 
 static QByteArray readLine( QIODevice* in )

@@ -66,7 +66,7 @@ protected:
         TokStream(const Toks& t = Toks(), quint32 pos = 0 ):d_toks(t),d_pos(pos){}
         Lexer::Token next();
         Lexer::Token peek(int la = 1) const;
-        bool atEnd() const { d_pos >= d_toks.size(); }
+        bool atEnd() const { return d_pos >= d_toks.size(); }
     };
 
     bool parseMethodBody( Ast::Method*, TokStream& );

@@ -65,6 +65,8 @@ protected:
     void fillPrimitives();
     void createUse();
     void fillUse(Ast::Named*);
+    void pushLocation();
+    void syncLists(QWidget* besides = 0);
 
 protected slots:
     void onClassesClicked();
@@ -74,6 +76,9 @@ protected slots:
     void onMessagesClicked();
     void onPrimitiveClicked();
     void onUseClicked();
+    void onGoBack();
+    void onGoForward();
+
 
 private:
     class CodeViewer;
@@ -93,6 +98,10 @@ private:
     QLabel* d_method;
     Ast::ClassRef d_curClass;
     Ast::MethodRef d_curMethod;
+    typedef QPair<Ast::ClassRef,Ast::MethodRef> Location;
+    QList<Location> d_backHisto; // d_backHisto.last() is the current location
+    QList<Location> d_forwardHisto;
+    bool d_pushBackLock;
 };
 }
 

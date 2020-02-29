@@ -37,12 +37,15 @@
 #include <QToolTip>
 #include <QHeaderView>
 #include <QFileDialog>
+#include <QShortcut>
 using namespace St;
 
 class ClassBrowser::CodeViewer : public QPlainTextEdit
 {
 public:
     ClassBrowser* d_that;
+    QString d_code;
+    QMap<quint32,quint16> d_offCorr; // filepos->offCorr
 
     CodeViewer( ClassBrowser* p ):QPlainTextEdit(p),d_that(p)
     {
@@ -52,9 +55,48 @@ public:
         new Highlighter(document());
     }
 
+    void setCode( QString str )
+    {
+        d_offCorr.clear();
+        d_offCorr[0] = 0;
+        int pos = str.indexOf("!!");
+        int off = 0;
+        while( pos != -1 )
+        {
+            off++;
+            d_offCorr[pos+2] = off;
+            pos = str.indexOf("!!", pos+2);
+        }
+        d_offCorr[str.size()] = off;
+        str.replace("!!", "!" );
+    #ifdef _ST_LEXER_SUPPORT_UNDERSCORE_IN_IDENTS_
+        str.replace(" _ ", " ← ");
+        str.replace(" _\r", " ←\r");
+    #else
+        str.replace("_", "←");
+    #endif
+        str.replace("^","↑");
+        d_code = str;
+        setPlainText(str);
+    }
+
+    int offCorr( quint32 methodPos ) const
+    {
+        QMap<quint32,quint16>::const_iterator i = d_offCorr.lowerBound(methodPos);
+        if( i != d_offCorr.end() )
+        {
+            --i;
+            //qDebug() << methodPos << i.key() << i.value() << d_offCorr;
+            return methodPos - i.value();
+        }else
+            return methodPos;
+    }
+
     void markCode( QTextCursor cur, const QPoint& pos, bool click )
     {
-        Ast::Expression* e = d_that->d_curMethod->findByPos( cur.position() + d_that->d_curMethod->d_pos );
+        const int numOfBangs = d_code.leftRef( cur.position() ).count(QChar('!'));
+        //qDebug() << "cur pos" << cur.position() << numOfBangs << cur.position() + numOfBangs;
+        Ast::Expression* e = d_that->d_curMethod->findByPos( cur.position() + numOfBangs + d_that->d_curMethod->d_pos );
         QList<QTextEdit::ExtraSelection> esl;
         QTextEdit::ExtraSelection sel;
         sel.format.setBackground( QColor(Qt::yellow) );
@@ -69,7 +111,7 @@ public:
                         break;
                     if( click )
                         d_that->fillUse(id->d_resolved);
-                    cur.setPosition( e->d_pos - d_that->d_curMethod->d_pos );
+                    cur.setPosition( offCorr( e->d_pos - d_that->d_curMethod->d_pos ) );
                     cur.setPosition( cur.position() + e->getLen(), QTextCursor::KeepAnchor );
                     sel.cursor = cur;
                     esl.append(sel);
@@ -79,7 +121,7 @@ public:
                         if( ids[i]->d_pos >= d_that->d_curMethod->d_pos &&
                                 ids[i]->d_pos < d_that->d_curMethod->d_endPos )
                         {
-                            cur.setPosition( ids[i]->d_pos - d_that->d_curMethod->d_pos );
+                            cur.setPosition( offCorr( ids[i]->d_pos - d_that->d_curMethod->d_pos ) );
                             cur.setPosition( cur.position() + ids[i]->getLen(), QTextCursor::KeepAnchor );
                             sel.cursor = cur;
                             esl.append(sel);
@@ -88,7 +130,7 @@ public:
                     if( id->d_resolved && id->d_resolved->d_pos >= d_that->d_curMethod->d_pos &&
                             id->d_resolved->d_pos < d_that->d_curMethod->d_endPos )
                     {
-                        cur.setPosition( id->d_resolved->d_pos - d_that->d_curMethod->d_pos );
+                        cur.setPosition( offCorr( id->d_resolved->d_pos - d_that->d_curMethod->d_pos ) );
                         cur.setPosition( cur.position() + id->d_resolved->getLen(), QTextCursor::KeepAnchor );
                         sel.cursor = cur;
                         esl.append(sel);
@@ -174,7 +216,7 @@ public:
                     Ast::MsgSend* s = static_cast<Ast::MsgSend*>(e);
                     for( int i = 0; i < s->d_pattern.size(); i++ )
                     {
-                        cur.setPosition( s->d_pattern[i].second - d_that->d_curMethod->d_pos );
+                        cur.setPosition( offCorr( s->d_pattern[i].second - d_that->d_curMethod->d_pos ) );
                         cur.setPosition( cur.position() + s->d_pattern[i].first.size(), QTextCursor::KeepAnchor );
                         sel.cursor = cur;
                         esl.append(sel);
@@ -183,6 +225,15 @@ public:
                         QToolTip::showText(pos,
                                        tr("<html><b>Message:</b><p>%1</p></html>")
                                        .arg(s->prettyName().constData()),this);
+                    QList<QTreeWidgetItem*> items = d_that->d_messages->findItems(
+                                s->prettyName(false), Qt::MatchExactly );
+                    if( items.size() == 1 )
+                    {
+                        d_that->d_messages->setCurrentItem(items.first());
+                        d_that->d_messages->scrollToItem(items.first(),QAbstractItemView::PositionAtTop );
+                        d_that->d_messages->expandItem(items.first());
+                    }else
+                        d_that->d_messages->setCurrentItem(0);
 
                 }
                 break;
@@ -198,148 +249,13 @@ public:
         {
             QTextCursor cur = cursorForPosition(event->pos());
             markCode( cur, event->globalPos(), true );
-#if 0
-            Ast::Expression* e = d_that->d_curMethod->findByPos( cur.position() + d_that->d_curMethod->d_pos );
-            QList<QTextEdit::ExtraSelection> esl;
-            QTextEdit::ExtraSelection sel;
-            sel.format.setBackground( QColor(Qt::yellow) );
-            if( e )
-            {
-                switch( e->getTag() )
-                {
-                case Ast::Thing::T_Ident:
-                    {
-                        Ast::Ident* id = static_cast<Ast::Ident*>(e);
-                        if( id->d_keyword )
-                            break;
-                        d_that->fillUse(id->d_resolved);
-                        cur.setPosition( e->d_pos - d_that->d_curMethod->d_pos );
-                        cur.setPosition( cur.position() + e->getLen(), QTextCursor::KeepAnchor );
-                        sel.cursor = cur;
-                        esl.append(sel);
-                        const QList<Ast::Ident*>& ids = d_that->d_mdl->getIxref().value(id->d_resolved);
-                        for( int i = 0; i < ids.size(); i++ )
-                        {
-                            if( ids[i]->d_pos >= d_that->d_curMethod->d_pos &&
-                                    ids[i]->d_pos < d_that->d_curMethod->d_endPos )
-                            {
-                                cur.setPosition( ids[i]->d_pos - d_that->d_curMethod->d_pos );
-                                cur.setPosition( cur.position() + ids[i]->getLen(), QTextCursor::KeepAnchor );
-                                sel.cursor = cur;
-                                esl.append(sel);
-                            }
-                        }
-                        if( id->d_resolved && id->d_resolved->d_pos >= d_that->d_curMethod->d_pos &&
-                                id->d_resolved->d_pos < d_that->d_curMethod->d_endPos )
-                        {
-                            cur.setPosition( id->d_resolved->d_pos - d_that->d_curMethod->d_pos );
-                            cur.setPosition( cur.position() + id->d_resolved->getLen(), QTextCursor::KeepAnchor );
-                            sel.cursor = cur;
-                            esl.append(sel);
-                        }
-                        QString title;
-                        switch( id->d_use )
-                        {
-                        case Ast::Ident::Declaration:
-                            title = "Declaration";
-                            break;
-                        case Ast::Ident::AssigTarget:
-                            title = "Assignment target";
-                            break;
-                        case Ast::Ident::MsgReceiver:
-                            title = "Message target";
-                            break;
-                        case Ast::Ident::Rhs:
-                            title = "Value source";
-                            break;
-                        default:
-                            title = "Unknown use";
-                            break;
-                        }
-                        QString text = "unresolved";
-                        if( id->d_resolved )
-                        {
-                            switch( id->d_resolved->getTag() )
-                            {
-                            case Ast::Thing::T_Method:
-                                text = QString("Method <i>%1</i>").arg(id->d_resolved->d_name.constData());
-                                break;
-                            case Ast::Thing::T_Variable:
-                                {
-                                    QString kind;
-                                    QString declared;
-                                    Ast::Variable* v = static_cast<Ast::Variable*>(id->d_resolved);
-                                    switch( v->d_kind )
-                                    {
-                                    case Ast::Variable::InstanceLevel:
-                                        kind = "Instance variable";
-                                        if( v->d_owner == d_that->d_curMethod->getClass() )
-                                            declared = " declared in this class";
-                                        else
-                                            declared = QString(" declared in class <i>%1</i>").
-                                                    arg(v->d_owner->d_name.constData());
-                                        break;
-                                    case Ast::Variable::ClassLevel:
-                                        kind = "Class variable";
-                                        if( v->d_owner == d_that->d_curMethod->getClass() )
-                                            declared = " declared in this class";
-                                        else
-                                            declared = QString(" declared in class <i>%1</i>").
-                                                    arg(v->d_owner->d_name.constData());
-                                        break;
-                                    case Ast::Variable::Argument:
-                                        kind = "Argument";
-                                        break;
-                                    case Ast::Variable::Temporary:
-                                        kind = "Temporary variable";
-                                        break;
-                                    case Ast::Variable::Global:
-                                        kind = "Global variable";
-                                        break;
-                                    }
-
-                                    text = QString("%1 <i>%2</i>%3").arg(kind)
-                                            .arg(id->d_resolved->d_name.constData() ).arg(declared);
-                                }
-                                break;
-                            case Ast::Thing::T_Class:
-                                text = QString("Class <i>%1</i>").arg(id->d_resolved->d_name.constData());
-                                break;
-                            }
-                        }
-                        QToolTip::showText(event->globalPos(),
-                                           tr("<html><b>%1:</b><p>%2</p></html>").arg(title)
-                                           .arg(text),this);
-                    }
-                    break;
-                case Ast::Thing::T_MsgSend:
-                    {
-                        Ast::MsgSend* s = static_cast<Ast::MsgSend*>(e);
-                        for( int i = 0; i < s->d_pattern.size(); i++ )
-                        {
-                            cur.setPosition( s->d_pattern[i].second - d_that->d_curMethod->d_pos );
-                            cur.setPosition( cur.position() + s->d_pattern[i].first.size(), QTextCursor::KeepAnchor );
-                            sel.cursor = cur;
-                            esl.append(sel);
-                        }
-                        QToolTip::showText(event->globalPos(),
-                                           tr("<html><b>Message:</b><p>%1</p></html>")
-                                           .arg(s->prettyName().constData()),this);
-
-                    }
-                    break;
-                }
-
-            }
-            setExtraSelections(esl);
-#endif
         }
         QPlainTextEdit::mousePressEvent(event);
     }
 };
 
 ClassBrowser::ClassBrowser(QWidget *parent)
-    : QMainWindow(parent)
+    : QMainWindow(parent),d_pushBackLock(false)
 {
     d_mdl = new Model(this);
 
@@ -374,6 +290,8 @@ ClassBrowser::ClassBrowser(QWidget *parent)
 
     setWindowTitle(tr("%1 %2").arg(qApp->applicationName()).arg(qApp->applicationVersion()));
 
+    new QShortcut(tr("ALT+LEFT"),this,SLOT(onGoBack()));
+    new QShortcut(tr("ALT+RIGHT"),this,SLOT(onGoForward()));
 }
 
 ClassBrowser::~ClassBrowser()
@@ -387,20 +305,27 @@ bool ClassBrowser::parse(const QString& path)
     if( !in.open(QIODevice::ReadOnly) )
         return false;
 
-    Parser::convertFile(&in,"out.txt");
+    // Parser::convertFile(&in,"out.txt");
     in.reset();
     d_path = path;
     QElapsedTimer time;
     time.start();
     const bool res = d_mdl->parse(&in);
     qDebug() << "parsed in" << time.elapsed() << "ms";
+    if( !res )
+    {
+        d_code->appendPlainText("**** Parsing errors");
+        foreach( const Model::Error& e, d_mdl->getErrs() )
+            d_code->appendPlainText(e.d_msg);
+        return false;
+    }
 
     fillClassList();
     fillCatList();
     fillHierarchy();
     fillMessages();
     fillPrimitives();
-    return res;
+    return true;
 }
 
 void ClassBrowser::closeEvent(QCloseEvent* event)
@@ -655,15 +580,7 @@ void ClassBrowser::fillMethod()
 
     in.seek( d_curMethod->d_pos );
     QString str = QString::fromUtf8( in.read( d_curMethod->d_endPos - d_curMethod->d_pos + 1 ) );
-    str.replace("!!", "!" );
-#ifdef _ST_LEXER_SUPPORT_UNDERSCORE_IN_IDENTS_
-    str.replace(" _ ", " ← ");
-    str.replace(" _\r", " ←\r");
-#else
-    str.replace("_", "←");
-#endif
-    str.replace("^","↑");
-    d_code->setPlainText( str );
+    d_code->setCode( str );
 }
 
 void ClassBrowser::createHierarchy()
@@ -734,6 +651,7 @@ void ClassBrowser::fillMessages()
             sub->setText(0, m->d_owner->d_name );
             sub->setToolTip(0, "category: " + m->d_category );
             sub->setData(0,Qt::UserRole, QVariant::fromValue( Ast::MethodRef(m) ) );
+            // sub->setData(0,Qt::UserRole+1, QVariant::fromValue( Ast::ClassRef(m->getClass()) ) );
         }
     }
     d_messages->sortByColumn(0,Qt::AscendingOrder);
@@ -866,6 +784,7 @@ void ClassBrowser::fillUse(Ast::Named* n)
             }
             QTreeWidgetItem* item = new QTreeWidgetItem( d_use );
             item->setText(0, QString::number(count) );
+            item->setToolTip(0, QString("%1 uses%2").arg(count).arg( isAssig ? ", used as assignment target" : "" ));
             item->setData(0,Qt::UserRole,id->d_pos);
             if( isAssig )
                 item->setFont(0,bold);
@@ -880,12 +799,132 @@ void ClassBrowser::fillUse(Ast::Named* n)
     d_use->resizeColumnToContents(0);
 }
 
+void ClassBrowser::pushLocation()
+{
+    if( d_pushBackLock )
+        return;
+    Location loc = qMakePair(d_curClass,d_curMethod);
+    if( !d_backHisto.isEmpty() && d_backHisto.last() == loc )
+        return; // o ist bereits oberstes Element auf dem Stack.
+    d_backHisto.removeAll( loc );
+    d_backHisto.push_back( loc );
+}
+
+static QTreeWidgetItem* _find( QTreeWidgetItem* w, const QVariant& v, int col )
+{
+    for( int i = 0; i < w->childCount(); i++ )
+    {
+        if( w->child(i)->data(col,Qt::UserRole) == v )
+            return w->child(i);
+        QTreeWidgetItem* res = _find(w->child(i), v, col );
+        if( res )
+            return res;
+    }
+    return 0;
+}
+
+static QTreeWidgetItem* _find( QTreeWidget* w, const QVariant& v, int col = 0 )
+{
+    for( int i = 0; i < w->topLevelItemCount(); i++ )
+    {
+        if( w->topLevelItem(i)->data(col,Qt::UserRole) == v )
+            return w->topLevelItem(i);
+        QTreeWidgetItem* res = _find(w->topLevelItem(i), v, col );
+        if( res )
+            return res;
+    }
+    return 0;
+}
+
+void ClassBrowser::syncLists(QWidget* besides)
+{
+    if( d_classes != besides )
+    {
+        if( d_curClass.isNull() )
+            d_classes->setCurrentItem(0);
+        else
+        {
+            QTreeWidgetItem* res = _find(d_classes, QVariant::fromValue(d_curClass) );
+            d_classes->setCurrentItem(res);
+            d_classes->scrollToItem(res);
+        }
+    }
+    if( d_cats != besides )
+    {
+        if( d_curClass.isNull() )
+            d_cats->setCurrentItem(0);
+        else
+        {
+            QTreeWidgetItem* res = _find(d_cats, QVariant::fromValue(d_curClass) );
+            d_cats->setCurrentItem(res);
+            d_cats->scrollToItem(res);
+        }
+    }
+    if( d_hierarchy != besides )
+    {
+        if( d_curClass.isNull() )
+            d_hierarchy->setCurrentItem(0);
+        else
+        {
+            QTreeWidgetItem* res = _find(d_hierarchy, QVariant::fromValue(d_curClass) );
+            d_hierarchy->setCurrentItem(res);
+            d_hierarchy->scrollToItem(res);
+        }
+    }
+    if( d_messages != besides )
+    {
+        if( d_curMethod.isNull() )
+            d_messages->setCurrentItem(0);
+        else
+        {
+            QTreeWidgetItem* res = _find(d_messages, QVariant::fromValue(d_curMethod) );
+            d_messages->setCurrentItem(res);
+            d_messages->scrollToItem(res);
+        }
+    }
+    if( d_primitives != besides )
+    {
+        if( d_curMethod.isNull() )
+            d_primitives->setCurrentItem(0);
+        else
+        {
+            QTreeWidgetItem* res = _find(d_primitives, QVariant::fromValue(d_curMethod) );
+            d_primitives->setCurrentItem(res);
+            d_primitives->scrollToItem(res);
+        }
+    }
+    if( d_members != besides )
+    {
+        if( d_curMethod.isNull() )
+            d_members->setCurrentItem(0);
+        else
+        {
+            QTreeWidgetItem* res = _find(d_members, QVariant::fromValue(d_curMethod) );
+            d_members->setCurrentItem(res);
+            d_members->scrollToItem(res);
+        }
+    }
+    if( d_use != besides )
+    {
+        if( d_curMethod.isNull() )
+            d_use->setCurrentItem(0);
+        else
+        {
+            QTreeWidgetItem* res = _find(d_use, QVariant::fromValue(d_curMethod), 1 );
+            d_use->setCurrentItem(res);
+            d_use->scrollToItem(res);
+        }
+    }
+}
+
 void ClassBrowser::onClassesClicked()
 {
     QTreeWidgetItem* item = d_classes->currentItem();
     if( item == 0 )
         return;
     setCurClass( item->data(0,Qt::UserRole).value<Ast::ClassRef>().data() );
+    pushLocation();
+    syncLists(d_classes);
 }
 
 void ClassBrowser::onCatsClicked()
@@ -894,6 +933,8 @@ void ClassBrowser::onCatsClicked()
     if( item == 0 || !item->data(0,Qt::UserRole).canConvert<Ast::ClassRef>() )
         return;
     setCurClass( item->data(0,Qt::UserRole).value<Ast::ClassRef>().data() );
+    pushLocation();
+    syncLists(d_cats);
 }
 
 void ClassBrowser::onMembersClicked()
@@ -902,6 +943,8 @@ void ClassBrowser::onMembersClicked()
     if( item == 0 || !item->data(0,Qt::UserRole).canConvert<Ast::MethodRef>() )
         return;
     setCurMethod( item->data(0,Qt::UserRole).value<Ast::MethodRef>().data() );
+    pushLocation();
+    syncLists(d_members);
 }
 
 void ClassBrowser::onHierarchyClicked()
@@ -910,6 +953,8 @@ void ClassBrowser::onHierarchyClicked()
     if( item == 0 || !item->data(0,Qt::UserRole).canConvert<Ast::ClassRef>() )
         return;
     setCurClass( item->data(0,Qt::UserRole).value<Ast::ClassRef>().data() );
+    pushLocation();
+    syncLists(d_hierarchy);
 }
 
 void ClassBrowser::onMessagesClicked()
@@ -920,6 +965,8 @@ void ClassBrowser::onMessagesClicked()
     setCurMethod( item->data(0,Qt::UserRole).value<Ast::MethodRef>().data() );
     if( !d_curMethod.isNull() )
         setCurClass( d_curMethod->getClass() );
+    pushLocation();
+    syncLists(d_messages);
 }
 
 void ClassBrowser::onPrimitiveClicked()
@@ -930,6 +977,8 @@ void ClassBrowser::onPrimitiveClicked()
     setCurMethod( item->data(0,Qt::UserRole).value<Ast::MethodRef>().data() );
     if( !d_curMethod.isNull() )
         setCurClass( d_curMethod->getClass() );
+    pushLocation();
+    syncLists(d_primitives);
 }
 
 void ClassBrowser::onUseClicked()
@@ -945,6 +994,35 @@ void ClassBrowser::onUseClicked()
         cur.setPosition( item->data(0,Qt::UserRole).toUInt() - d_curMethod->d_pos );
         d_code->markCode( cur, QPoint(), false );
     }
+    pushLocation();
+    syncLists(d_use);
+}
+
+void ClassBrowser::onGoBack()
+{
+    if( d_backHisto.size() <= 1 )
+        return;
+
+    d_pushBackLock = true;
+    d_forwardHisto.push_back( d_backHisto.last() );
+    d_backHisto.pop_back();
+    setCurClass(d_backHisto.last().first.data());
+    setCurMethod(d_backHisto.last().second.data());
+    syncLists();
+    d_pushBackLock = false;
+}
+
+void ClassBrowser::onGoForward()
+{
+    if( d_forwardHisto.isEmpty() )
+        return;
+
+    Location cur = d_forwardHisto.last();
+    d_forwardHisto.pop_back();
+    setCurClass(cur.first.data());
+    setCurMethod(cur.second.data());
+    syncLists();
+    pushLocation();
 }
 
 int main(int argc, char *argv[])
@@ -953,7 +1031,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Class Browser");
-    a.setApplicationVersion("0.4");
+    a.setApplicationVersion("0.5");
     a.setStyle("Fusion");
 
     ClassBrowser w;
