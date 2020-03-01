@@ -209,6 +209,15 @@ public:
                         QToolTip::showText(pos,
                                        tr("<html><b>%1:</b><p>%2</p></html>").arg(title)
                                        .arg(text),this);
+                    QList<QTreeWidgetItem*> items = d_that->d_vars->findItems(
+                                id->d_ident, Qt::MatchExactly );
+                    if( items.size() == 1 )
+                    {
+                        d_that->d_vars->setCurrentItem(items.first());
+                        d_that->d_vars->scrollToItem(items.first(),QAbstractItemView::PositionAtCenter );
+                        d_that->d_vars->expandItem(items.first());
+                    }else
+                        d_that->d_vars->setCurrentItem(0);
                 }
                 break;
             case Ast::Thing::T_MsgSend:
@@ -230,7 +239,7 @@ public:
                     if( items.size() == 1 )
                     {
                         d_that->d_messages->setCurrentItem(items.first());
-                        d_that->d_messages->scrollToItem(items.first(),QAbstractItemView::PositionAtTop );
+                        d_that->d_messages->scrollToItem(items.first(),QAbstractItemView::PositionAtCenter );
                         d_that->d_messages->expandItem(items.first());
                     }else
                         d_that->d_messages->setCurrentItem(0);
@@ -274,6 +283,7 @@ ClassBrowser::ClassBrowser(QWidget *parent)
     createMessages();
     createPrimitives();
     createUse();
+    createVars();
 
     QSettings s;
 
@@ -325,6 +335,7 @@ bool ClassBrowser::parse(const QString& path)
     fillHierarchy();
     fillMessages();
     fillPrimitives();
+    fillVars();
     return true;
 }
 
@@ -522,6 +533,17 @@ void ClassBrowser::setCurMethod(Ast::Method* m)
         d_curClass = m->getClass();
     d_curMethod = m;
     fillMethod();
+}
+
+void ClassBrowser::setCurVar(Ast::Variable* v)
+{
+    if( v != 0 )
+    {
+        d_curClass = v->d_owner->getClass();
+        fillMembers();
+    }
+    d_curVar = v;
+    fillUse(d_curVar.data());
 }
 
 QString ClassBrowser::getClassSummary(Ast::Class* c, bool elided)
@@ -895,11 +917,16 @@ void ClassBrowser::syncLists(QWidget* besides)
     }
     if( d_members != besides )
     {
-        if( d_curMethod.isNull() )
+        if( d_curMethod.isNull() && d_curVar.isNull() )
             d_members->setCurrentItem(0);
-        else
+        else if( !d_curMethod.isNull() )
         {
             QTreeWidgetItem* res = _find(d_members, QVariant::fromValue(d_curMethod) );
+            d_members->setCurrentItem(res);
+            d_members->scrollToItem(res);
+        }else
+        {
+            QTreeWidgetItem* res = _find(d_members, QVariant::fromValue(d_curVar) );
             d_members->setCurrentItem(res);
             d_members->scrollToItem(res);
         }
@@ -915,6 +942,48 @@ void ClassBrowser::syncLists(QWidget* besides)
             d_use->scrollToItem(res);
         }
     }
+}
+
+void ClassBrowser::createVars()
+{
+    QDockWidget* dock = new QDockWidget( tr("Globals && Fields"), this );
+    dock->setObjectName("Vars");
+    dock->setAllowedAreas( Qt::AllDockWidgetAreas );
+    dock->setFeatures( QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetClosable );
+    d_vars = new QTreeWidget(dock);
+    d_vars->setHeaderHidden(true);
+    d_vars->setAlternatingRowColors(true);
+    dock->setWidget(d_vars);
+    addDockWidget( Qt::LeftDockWidgetArea, dock );
+    connect( d_vars, SIGNAL(itemClicked(QTreeWidgetItem*,int)), this, SLOT(onVarsClicked()) );
+}
+
+void ClassBrowser::fillVars()
+{
+    d_vars->clear();
+    const Model::VariableXref& vx = d_mdl->getVxref();
+    QFont bold = d_vars->font();
+    bold.setBold(true);
+    Model::VariableXref::const_iterator i;
+    for( i = vx.begin(); i != vx.end(); ++i )
+    {
+        QTreeWidgetItem* item = new QTreeWidgetItem( d_vars );
+        item->setText(0, i.key() );
+        item->setToolTip(0,item->text(0));
+        foreach( Ast::Variable* v, i.value() )
+        {
+            QTreeWidgetItem* sub = new QTreeWidgetItem( item );
+            if( v->d_owner && v->d_owner->getTag() == Ast::Thing::T_Class )
+                sub->setText(0, v->d_owner->d_name );
+            else
+            {
+                sub->setText(0, "<global>" );
+                item->setFont(0,bold );
+            }
+            sub->setData(0,Qt::UserRole, QVariant::fromValue( Ast::VarRef(v) ) );
+        }
+    }
+    d_vars->sortByColumn(0,Qt::AscendingOrder);
 }
 
 void ClassBrowser::onClassesClicked()
@@ -940,11 +1009,18 @@ void ClassBrowser::onCatsClicked()
 void ClassBrowser::onMembersClicked()
 {
     QTreeWidgetItem* item = d_members->currentItem();
-    if( item == 0 || !item->data(0,Qt::UserRole).canConvert<Ast::MethodRef>() )
+    if( item == 0 )
         return;
-    setCurMethod( item->data(0,Qt::UserRole).value<Ast::MethodRef>().data() );
-    pushLocation();
-    syncLists(d_members);
+    if( item->data(0,Qt::UserRole).canConvert<Ast::MethodRef>() )
+    {
+        setCurMethod( item->data(0,Qt::UserRole).value<Ast::MethodRef>().data() );
+        pushLocation();
+        syncLists(d_members);
+    }else if( item->data(0,Qt::UserRole).canConvert<Ast::VarRef>() )
+    {
+        setCurVar( item->data(0,Qt::UserRole).value<Ast::VarRef>().data() );
+        syncLists(d_members);
+    }
 }
 
 void ClassBrowser::onHierarchyClicked()
@@ -979,6 +1055,16 @@ void ClassBrowser::onPrimitiveClicked()
         setCurClass( d_curMethod->getClass() );
     pushLocation();
     syncLists(d_primitives);
+}
+
+void ClassBrowser::onVarsClicked()
+{
+    QTreeWidgetItem* item = d_vars->currentItem();
+    if( item == 0 || !item->data(0,Qt::UserRole).canConvert<Ast::VarRef>() )
+        return;
+    d_curMethod = 0;
+    setCurVar( item->data(0,Qt::UserRole).value<Ast::VarRef>().data() );
+    syncLists(d_vars);
 }
 
 void ClassBrowser::onUseClicked()
@@ -1031,7 +1117,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Class Browser");
-    a.setApplicationVersion("0.5");
+    a.setApplicationVersion("0.6");
     a.setStyle("Fusion");
 
     ClassBrowser w;

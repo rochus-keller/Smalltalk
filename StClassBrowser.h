@@ -53,6 +53,7 @@ protected:
     void fillMembers();
     void setCurClass(Ast::Class*);
     void setCurMethod(Ast::Method*);
+    void setCurVar(Ast::Variable*);
     static QString getClassSummary(Ast::Class*, bool elided = true);
     void createMethod();
     void fillMethod();
@@ -67,6 +68,8 @@ protected:
     void fillUse(Ast::Named*);
     void pushLocation();
     void syncLists(QWidget* besides = 0);
+    void createVars();
+    void fillVars();
 
 protected slots:
     void onClassesClicked();
@@ -75,6 +78,7 @@ protected slots:
     void onHierarchyClicked();
     void onMessagesClicked();
     void onPrimitiveClicked();
+    void onVarsClicked();
     void onUseClicked();
     void onGoBack();
     void onGoForward();
@@ -91,6 +95,7 @@ private:
     QTreeWidget* d_hierarchy;
     QTreeWidget* d_messages;
     QTreeWidget* d_primitives;
+    QTreeWidget* d_vars;
     QTreeWidget* d_use;
     QLabel* d_useTitle;
     CodeViewer* d_code;
@@ -98,6 +103,7 @@ private:
     QLabel* d_method;
     Ast::ClassRef d_curClass;
     Ast::MethodRef d_curMethod;
+    Ast::VarRef d_curVar;
     typedef QPair<Ast::ClassRef,Ast::MethodRef> Location;
     QList<Location> d_backHisto; // d_backHisto.last() is the current location
     QList<Location> d_forwardHisto;

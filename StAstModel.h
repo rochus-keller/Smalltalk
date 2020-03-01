@@ -289,6 +289,7 @@ public:
     typedef QHash< const char*, Ast::Ref<Ast::Class> > Classes2;
     typedef QMap<QByteArray, QList<Ast::Class*> > ClassCats;
     typedef QHash<const char*, QList<Ast::Method*> > MethodXref;
+    typedef QHash<const char*, QList<Ast::Variable*> > VariableXref;
     typedef QHash<quint16, QList<Ast::Method*> > PrimitiveXref;
     typedef QHash<Ast::Named*, QList<Ast::Ident*> > IdentXref;
 
@@ -309,6 +310,7 @@ public:
     const MethodXref& getMxref() const { return d_mx; }
     const PrimitiveXref& getPxref() const { return d_px; }
     const IdentXref& getIxref() const { return d_ix; }
+    const VariableXref& getVxref() const { return d_vx; }
     const QList<Error>& getErrs() const { return d_errs; }
 protected:
     void fillGlobals();
@@ -319,6 +321,7 @@ private:
     Classes2 d_classes2;
     ClassCats d_cats;
     MethodXref d_mx;
+    VariableXref d_vx; // only global, instance and class vars
     PrimitiveXref d_px;
     IdentXref d_ix;
     QByteArray nil;

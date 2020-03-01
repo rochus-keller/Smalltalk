@@ -25,89 +25,90 @@ using namespace St;
 using namespace St::Ast;
 
 static const char* s_globals[] = {
-    "DefaultBaseline",
-    "FamilyName",
-    // error "firstByte",
-    "CCW",
-    "CtrlS",
-    "BS2",
-    "CR",
-    "CtrlShiftMinus",
-    "Display",
-    "Paste",
-    "Dfmask",
-    "Face",
-    "SuperscriptedBit",
-    "Sn1",
-    "SystemOrganization",
-    // error "response",
-    "Processor",
-    "Pagen",
-    "DefaultTabsArray",
-    "NonFaceEmphasisMask",
-    "SubscriptedBit",
-    "CrossedX",
-    // error "byte",
-    "Dirname",
-    // error "secondByte",
-    "Justified",
-    "PointSize",
+
+    "AltoFilePool",     // Alto stuff
+    "Backp",            // Alto stuff
+    "Basal",            // Font Face ?
+    "Boffset",          // Alto stuff
     "Bold",
-    "Write",
-    "CtrlMinus",
-    "CtrlB",
-    "Underlined",
-    "DefaultMarginTabsArray",
-    "DefaultLineGrid",
-    "Cut",
-    "Ctrlb",
-    "DefaultSpace",
-    "DefaultMask",
-    "Smalltalk",
-    "Ctrls",
-    "Centered",
-    "Read",
-    "Undeclared",
     "BoldItalic",
-    "RightFlush",
-    "DefaultRule",
-    "Space",
-    "Ctrlx",
-    "SubSuperscriptMask",
-    "Sn2",
-    "AltoFilePool",
-    "Sensor", // NOTE: Sensor seems to be the only global appearing left of an assignment
-    "Nextp",
-    "Basal",
-    "DefaultTab",
-    "CaretForm",
-    "ScheduledControllers",
-    "Boffset",
-    "UnderlinedBit",
-    "DefaultTextStyle",
-    "Numch",
-    "Transcript",
-    "FilePool",
-    "Ctrli",
-    "Tab",
-    "EndOfRun",
-    "Ctrlw",
-    "Ctrlf",
-    "TextConstants",
-    "CCR",
-    "ESC",
-    "Shorten",
-    "CtrlI",
     "BS",
-    "CWW",
-    "Backp",
-    "Vn",
-    "LeftFlush",
-    "Italic",
-    "Disk",
+    "BS2",
+    "CaretForm",
+    "CCR",
+    "CCW",
+    "Centered",
+    "CR",
+    "CrossedX",
+    "CtrlB",
+    "Ctrlb",
+    "Ctrlf",
+    "Ctrli",
+    "CtrlI",
+    "CtrlMinus",
+    "CtrlS",
+    "Ctrls",
+    "CtrlShiftMinus",
     "Ctrlt",
-    "SourceFiles",
+    "Ctrlw",
+    "Ctrlx",
     "Ctrlz",
+    "Cut",
+    "CWW",
+    "DefaultBaseline",
+    "DefaultLineGrid",
+    "DefaultMarginTabsArray",
+    "DefaultMask",
+    "DefaultRule",
+    "DefaultSpace",
+    "DefaultTab",
+    "DefaultTabsArray",
+    "DefaultTextStyle",
+    "Dfmask",
+    "Dirname",
+    "Disk",
+    "Display",
+    "EndOfRun",
+    "ESC",
+    "Face",
+    "FamilyName",
+    "FilePool",
+    "Italic",
+    "Justified",
+    "LeftFlush",
+    "Nextp",
+    "NonFaceEmphasisMask",
+    "Numch",
+    "Pagen",
+    "Paste",
+    "PointSize",
+    "Processor",
+    "Read",
+    "RightFlush",
+    "ScheduledControllers", // class ControlManager
+    "Sensor",               // NOTE: Sensor seems to be the only global appearing left of an assignment
+    "Shorten",
+    "Smalltalk",            // class SystemDictionary
+    "Sn1",                  // Alto stuff
+    "Sn2",                  // Alto stuff
+    "SourceFiles",          // OrderedCollection ?
+    "Space",
+    "SubscriptedBit",
+    "SubSuperscriptMask",
+    "SuperscriptedBit",
+    "SystemOrganization",
+    "Tab",
+    "TextConstants",
+    "Transcript",
+    "Undeclared",
+    "Underlined",
+    "UnderlinedBit",
+    "Vn",
+    "Write",
+    // st80 original error "byte",
+    // st80 original error "firstByte",
+    // st80 original error "response",
+    // st80 original error "secondByte",
     0
 };
 
@@ -336,6 +337,10 @@ bool Model::parse(QIODevice* in)
             if( i.value()->d_methods[j]->d_primitive )
                 d_px[ i.value()->d_methods[j]->d_primitive ].append( i.value()->d_methods[j].data() );
         }
+        for( int j = 0; j < i.value()->d_vars.size(); j++ )
+        {
+            d_vx[ i.value()->d_vars[j]->d_name.constData() ].append( i.value()->d_vars[j].data() );
+        }
     }
 
     ResolveIdents ri;
@@ -365,6 +370,7 @@ void Model::clear()
     d_cats.clear();
     d_keywords.clear();
     d_ix.clear();
+    d_vx.clear();
     d_globals.d_varNames.clear();
     d_globals.d_vars.clear();
 }
@@ -380,6 +386,7 @@ void Model::fillGlobals()
         v->d_owner = &d_globals;
         d_globals.d_vars.append(v);
         d_globals.d_varNames[v->d_name.constData()].append( v.data() );
+        d_vx[v->d_name.constData()].append( v.data() );
         i++;
     }
 }
