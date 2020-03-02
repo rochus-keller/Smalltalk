@@ -569,6 +569,7 @@ Ref<Expression> Parser::parseExpression(Ast::Function* scope,Parser::TokStream& 
             // binarySelector
             c = new MsgSend();
             c->d_pos = lhs->d_pos;
+            c->d_inMethod = scope->getMethod();
             QByteArray str;
             const quint32 pos = t.d_pos;
             str.append(ts.next().d_val);
@@ -595,6 +596,7 @@ Ref<Expression> Parser::parseExpression(Ast::Function* scope,Parser::TokStream& 
 
                 c = new MsgSend();
                 c->d_pos = lhs->d_pos;
+                c->d_inMethod = scope->getMethod();
                 c->d_patternType = Ast::KeywordPattern;
                 while( t.d_type == Lexer::Ident )
                 {
@@ -617,6 +619,7 @@ Ref<Expression> Parser::parseExpression(Ast::Function* scope,Parser::TokStream& 
                 // unary selector
                 c = new MsgSend();
                 c->d_pos = lhs->d_pos;
+                c->d_inMethod = scope->getMethod();
                 c->d_pattern << qMakePair(t.d_val,t.d_pos);
                 c->d_patternType = Ast::UnaryPattern;
                 ts.next();

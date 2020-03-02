@@ -110,7 +110,7 @@ public:
                     if( id->d_keyword )
                         break;
                     if( click )
-                        d_that->fillUse(id->d_resolved);
+                        d_that->fillNamedUse(id->d_resolved);
                     cur.setPosition( offCorr( e->d_pos - d_that->d_curMethod->d_pos ) );
                     cur.setPosition( cur.position() + e->getLen(), QTextCursor::KeepAnchor );
                     sel.cursor = cur;
@@ -223,6 +223,11 @@ public:
             case Ast::Thing::T_MsgSend:
                 {
                     Ast::MsgSend* s = static_cast<Ast::MsgSend*>(e);
+                    if( click )
+                    {
+                        QByteArray name = Lexer::getSymbol(s->prettyName(false));
+                        d_that->fillPatternUse(name);
+                    }
                     for( int i = 0; i < s->d_pattern.size(); i++ )
                     {
                         cur.setPosition( offCorr( s->d_pattern[i].second - d_that->d_curMethod->d_pos ) );
@@ -543,7 +548,6 @@ void ClassBrowser::setCurVar(Ast::Variable* v)
         fillMembers();
     }
     d_curVar = v;
-    fillUse(d_curVar.data());
 }
 
 QString ClassBrowser::getClassSummary(Ast::Class* c, bool elided)
@@ -742,7 +746,7 @@ void ClassBrowser::createUse()
     connect( d_use, SIGNAL(itemClicked(QTreeWidgetItem*,int)), this, SLOT(onUseClicked()) );
 }
 
-void ClassBrowser::fillUse(Ast::Named* n)
+void ClassBrowser::fillNamedUse(Ast::Named* n)
 {
     d_use->clear();
     d_useTitle->clear();
@@ -813,6 +817,47 @@ void ClassBrowser::fillUse(Ast::Named* n)
             item->setText(1, QString("%1 %2").arg(id->d_inMethod->getClass()->d_name.constData() ).
                           arg(id->d_inMethod->d_name.constData() ) );
             item->setData(1,Qt::UserRole, QVariant::fromValue( Ast::MethodRef(id->d_inMethod) ) );
+            item->setToolTip(1,item->text(1));
+        }else
+            i++;
+    }
+    d_use->sortByColumn(1,Qt::AscendingOrder);
+    d_use->resizeColumnToContents(0);
+}
+
+void ClassBrowser::fillPatternUse(const QByteArray& pat)
+{
+    d_use->clear();
+    d_useTitle->clear();
+
+    if( pat.isEmpty() )
+        return;
+
+    d_useTitle->setText(QString("Pattern <b><i>%1</i></b>").arg( pat.constData() ) );
+
+    const QList<Ast::MsgSend*>& sends = d_mdl->getTxref().value(pat.constData());
+    Ast::Method* m = 0;
+    int i = 0;
+    while( i < sends.size() )
+    {
+        if( sends[i]->d_inMethod != m )
+        {
+            int count = 0;
+            Ast::MsgSend* send = sends[i];
+            m = send->d_inMethod;
+            while( i < sends.size() && sends[i]->d_inMethod == m )
+            {
+                count++;
+                i++;
+            }
+            QTreeWidgetItem* item = new QTreeWidgetItem( d_use );
+            item->setText(0, QString::number(count) );
+            item->setToolTip(0, QString("%1 uses").arg(count));
+            Q_ASSERT( !send->d_pattern.isEmpty() );
+            item->setData(0,Qt::UserRole,send->d_pattern.first().second );
+            item->setText(1, QString("%1 %2").arg(send->d_inMethod->getClass()->d_name.constData() ).
+                          arg(send->d_inMethod->d_name.constData() ) );
+            item->setData(1,Qt::UserRole, QVariant::fromValue( Ast::MethodRef(send->d_inMethod) ) );
             item->setToolTip(1,item->text(1));
         }else
             i++;
@@ -994,6 +1039,7 @@ void ClassBrowser::onClassesClicked()
     setCurClass( item->data(0,Qt::UserRole).value<Ast::ClassRef>().data() );
     pushLocation();
     syncLists(d_classes);
+    fillNamedUse(d_curClass.data());
 }
 
 void ClassBrowser::onCatsClicked()
@@ -1004,6 +1050,7 @@ void ClassBrowser::onCatsClicked()
     setCurClass( item->data(0,Qt::UserRole).value<Ast::ClassRef>().data() );
     pushLocation();
     syncLists(d_cats);
+    fillNamedUse(d_curClass.data());
 }
 
 void ClassBrowser::onMembersClicked()
@@ -1016,10 +1063,12 @@ void ClassBrowser::onMembersClicked()
         setCurMethod( item->data(0,Qt::UserRole).value<Ast::MethodRef>().data() );
         pushLocation();
         syncLists(d_members);
+        fillPatternUse(d_curMethod->d_name);
     }else if( item->data(0,Qt::UserRole).canConvert<Ast::VarRef>() )
     {
         setCurVar( item->data(0,Qt::UserRole).value<Ast::VarRef>().data() );
         syncLists(d_members);
+        fillNamedUse(d_curVar.data());
     }
 }
 
@@ -1031,6 +1080,7 @@ void ClassBrowser::onHierarchyClicked()
     setCurClass( item->data(0,Qt::UserRole).value<Ast::ClassRef>().data() );
     pushLocation();
     syncLists(d_hierarchy);
+    fillNamedUse(d_curClass.data());
 }
 
 void ClassBrowser::onMessagesClicked()
@@ -1043,6 +1093,7 @@ void ClassBrowser::onMessagesClicked()
         setCurClass( d_curMethod->getClass() );
     pushLocation();
     syncLists(d_messages);
+    fillPatternUse(d_curMethod->d_name);
 }
 
 void ClassBrowser::onPrimitiveClicked()
@@ -1055,6 +1106,7 @@ void ClassBrowser::onPrimitiveClicked()
         setCurClass( d_curMethod->getClass() );
     pushLocation();
     syncLists(d_primitives);
+    fillPatternUse(d_curMethod->d_name);
 }
 
 void ClassBrowser::onVarsClicked()
@@ -1065,6 +1117,7 @@ void ClassBrowser::onVarsClicked()
     d_curMethod = 0;
     setCurVar( item->data(0,Qt::UserRole).value<Ast::VarRef>().data() );
     syncLists(d_vars);
+    fillNamedUse(d_curVar.data());
 }
 
 void ClassBrowser::onUseClicked()
@@ -1077,8 +1130,12 @@ void ClassBrowser::onUseClicked()
     {
         setCurClass( d_curMethod->getClass() );
         QTextCursor cur = d_code->textCursor();
-        cur.setPosition( item->data(0,Qt::UserRole).toUInt() - d_curMethod->d_pos );
-        d_code->markCode( cur, QPoint(), false );
+        const quint32 pos = item->data(0,Qt::UserRole).toUInt();
+        if( pos > d_curMethod->d_pos )
+        {
+            cur.setPosition( pos - d_curMethod->d_pos );
+            d_code->markCode( cur, QPoint(), false );
+        }
     }
     pushLocation();
     syncLists(d_use);
@@ -1117,7 +1174,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Class Browser");
-    a.setApplicationVersion("0.6");
+    a.setApplicationVersion("0.7");
     a.setStyle("Fusion");
 
     ClassBrowser w;

@@ -264,6 +264,8 @@ struct Model::ResolveIdents : public AstVisitor
         for( int i = 0; i < s->d_args.size(); i++ )
             s->d_args[i]->accept(this);
         s->d_receiver->accept(this);
+        QByteArray name = Lexer::getSymbol( s->prettyName(false) );
+        mdl->d_tx[name.constData()].append(s);
         if( s->d_receiver->getTag() == Ast::Thing::T_Ident )
         {
             Ast::Ident* id = static_cast<Ast::Ident*>(s->d_receiver.data());
@@ -370,6 +372,7 @@ void Model::clear()
     d_cats.clear();
     d_keywords.clear();
     d_ix.clear();
+    d_tx.clear();
     d_vx.clear();
     d_globals.d_varNames.clear();
     d_globals.d_vars.clear();

@@ -65,7 +65,8 @@ protected:
     void createPrimitives();
     void fillPrimitives();
     void createUse();
-    void fillUse(Ast::Named*);
+    void fillNamedUse(Ast::Named*);
+    void fillPatternUse(const QByteArray&);
     void pushLocation();
     void syncLists(QWidget* besides = 0);
     void createVars();
