@@ -83,6 +83,7 @@ protected slots:
     void onUseClicked();
     void onGoBack();
     void onGoForward();
+    void onLink( const QString& link );
 
 
 private:

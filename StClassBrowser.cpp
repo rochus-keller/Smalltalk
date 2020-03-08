@@ -202,6 +202,13 @@ public:
                             break;
                         case Ast::Thing::T_Class:
                             text = QString("Class <i>%1</i>").arg(id->d_resolved->d_name.constData());
+                            if( click && QApplication::keyboardModifiers() == Qt::ControlModifier )
+                            {
+                                d_that->setCurClass( d_that->d_mdl->getClasses().value(id->d_resolved->d_name).data() );
+                                d_that->pushLocation();
+                                d_that->syncLists();
+                                d_that->fillNamedUse(d_that->d_curClass.data());
+                            }
                             break;
                         }
                     }
@@ -236,9 +243,32 @@ public:
                         esl.append(sel);
                     }
                     if( click )
+                    {
+                        if( QApplication::keyboardModifiers() == Qt::ControlModifier )
+                        {
+                            if( s->d_receiver->getTag() == Ast::Thing::T_Ident )
+                            {
+                                Ast::Ident* id = static_cast<Ast::Ident*>( s->d_receiver.data() );
+                                if( id->d_resolved && id->d_resolved->getTag() == Ast::Thing::T_Class )
+                                {
+                                    Ast::Class* cls = static_cast<Ast::Class*>( id->d_resolved );
+                                    Ast::Method* m = cls->findMethod( Lexer::getSymbol(s->prettyName(false)) );
+                                    if( m )
+                                    {
+                                        d_that->setCurMethod(m);
+                                        d_that->setCurClass( m->getClass() );
+                                        d_that->pushLocation();
+                                        d_that->syncLists();
+                                        d_that->fillPatternUse(m->d_name);
+                                        return;
+                                    }
+                                }
+                            }
+                        }
                         QToolTip::showText(pos,
                                        tr("<html><b>Message:</b><p>%1</p></html>")
                                        .arg(s->prettyName().constData()),this);
+                    }
                     QList<QTreeWidgetItem*> items = d_that->d_messages->findItems(
                                 s->prettyName(false), Qt::MatchExactly );
                     if( items.size() == 1 )
@@ -454,12 +484,14 @@ void ClassBrowser::createMembers()
     dock->setWidget(pane);
     addDockWidget( Qt::RightDockWidgetArea, dock );
     connect( d_members, SIGNAL(itemClicked(QTreeWidgetItem*,int)), this, SLOT(onMembersClicked()) );
+    connect( d_class, SIGNAL(linkActivated(QString)), this, SLOT(onLink(QString)) );
 }
 
 static QByteArray superClasses( Ast::Class* c )
 {
     if( c && c->getSuper() )
-        return c->getSuper()->d_name + " " + superClasses( c->getSuper() );
+        return "<a href=\"class:" + c->getSuper()->d_name + "\">" +
+                c->getSuper()->d_name + "</a> " + superClasses( c->getSuper() );
     else
         return QByteArray();
 }
@@ -544,8 +576,12 @@ void ClassBrowser::setCurVar(Ast::Variable* v)
 {
     if( v != 0 )
     {
-        d_curClass = v->d_owner->getClass();
-        fillMembers();
+        Ast::Class* c = v->d_owner->getClass();
+        if( d_curClass != c )
+        {
+            d_curClass = v->d_owner->getClass();
+            fillMembers();
+        }
     }
     d_curVar = v;
 }
@@ -1067,6 +1103,7 @@ void ClassBrowser::onMembersClicked()
     }else if( item->data(0,Qt::UserRole).canConvert<Ast::VarRef>() )
     {
         setCurVar( item->data(0,Qt::UserRole).value<Ast::VarRef>().data() );
+        pushLocation();
         syncLists(d_members);
         fillNamedUse(d_curVar.data());
     }
@@ -1116,6 +1153,7 @@ void ClassBrowser::onVarsClicked()
         return;
     d_curMethod = 0;
     setCurVar( item->data(0,Qt::UserRole).value<Ast::VarRef>().data() );
+    pushLocation();
     syncLists(d_vars);
     fillNamedUse(d_curVar.data());
 }
@@ -1168,13 +1206,24 @@ void ClassBrowser::onGoForward()
     pushLocation();
 }
 
+void ClassBrowser::onLink(const QString& link)
+{
+    if( link.startsWith("class:") )
+    {
+        setCurClass( d_mdl->getClasses().value(link.mid(6).toUtf8()).data() );
+        pushLocation();
+        syncLists();
+        fillNamedUse(d_curClass.data());
+    }
+}
+
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Class Browser");
-    a.setApplicationVersion("0.7");
+    a.setApplicationVersion("0.7.1");
     a.setStyle("Fusion");
 
     ClassBrowser w;

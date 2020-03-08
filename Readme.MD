@@ -37,7 +37,8 @@ There is also an AST and a visitor which I will use for future code generator im
 
 The Class Browser has a few special features that I need for my analysis. There is syntax highlighting of course
 but it also marks all keywords of the same message and all uses of a declaration. If you click on the identifier
-there is a tooltip with information whether it's a temporary, instance or class variable, etc. There is also
+there is a tooltip with information whether it's a temporary, instance or class variable, etc. If you CTRL+click on a 
+class identifier or on a message sent to an explicit class then it navigates to this class and method. There is also
 a list with all methods of all classes where a variable is used or assigned to; other lists show all message patterns
 or primaries used in the system and in which classes/methods they are implemented.
 There is also a browsing history; you can go back or forward using the ALT+Left and ALT+Right keys.
