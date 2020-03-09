@@ -496,6 +496,29 @@ static QByteArray superClasses( Ast::Class* c )
         return QByteArray();
 }
 
+static QString fieldList( Ast::Class* c, int& nr, bool instance )
+{
+    QString res;
+    Ast::Class* super = c->getSuper();
+    if( super )
+        res = fieldList(super, nr,instance);
+    QString vars;
+    for( int i = 0; i < c->d_vars.size(); i++ )
+    {
+        if( ( instance && c->d_vars[i]->d_kind == Ast::Variable::InstanceLevel )
+                || ( !instance && c->d_vars[i]->d_kind == Ast::Variable::ClassLevel ) )
+            vars += QString("<br>%1 %2").arg(nr++).arg(c->d_vars[i]->d_name.constData());
+    }
+    if( !vars.isEmpty() )
+    {
+        if( !res.isEmpty() )
+            res += "<br>\n";
+        res += QString("<u>%1</u>").arg(c->d_name.constData()) + vars;
+    }
+
+    return res;
+}
+
 void ClassBrowser::fillMembers()
 {
     d_class->clear();
@@ -519,6 +542,11 @@ void ClassBrowser::fillMembers()
         QTreeWidgetItem* fields = new QTreeWidgetItem(d_members);
         fields->setFont(0,bold);
         fields->setText(0,tr("fields:"));
+        int nr = 1;
+        QString varlist = "<h3>Instance:</h3>\n" + fieldList( d_curClass.data(), nr, true );
+        nr = 1;
+        varlist += "<h3>Class:</h3>\n" + fieldList( d_curClass.data(), nr, false );
+        fields->setToolTip(0, varlist );
         for( int i = 0; i < d_curClass->d_vars.size(); i++ )
         {
             QTreeWidgetItem* sub1 = new QTreeWidgetItem(fields);
@@ -552,6 +580,7 @@ void ClassBrowser::fillMembers()
                 mem->setText(0,QString("[c] %1").arg(k.key().constData()));
             else
                 mem->setText(0, k.key());
+            mem->setToolTip(0,mem->text(0));
             mem->setData(0,Qt::UserRole,QVariant::fromValue(Ast::MethodRef(k.value())));
         }
     }
@@ -1223,7 +1252,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Class Browser");
-    a.setApplicationVersion("0.7.1");
+    a.setApplicationVersion("0.7.2");
     a.setStyle("Fusion");
 
     ClassBrowser w;

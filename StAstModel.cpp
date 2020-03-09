@@ -332,7 +332,7 @@ bool Model::parse(QIODevice* in)
         d_classes.insert( i.value()->d_name, i.value() );
         if( !i.value()->d_category.isEmpty() )
             d_cats[ i.value()->d_category ].append( i.value().data() );
-        std::sort( i.value()->d_vars.begin(), i.value()->d_vars.end(), sortFields );
+        // don't sort vars: std::sort( i.value()->d_vars.begin(), i.value()->d_vars.end(), sortFields );
         for( int j = 0; j < i.value()->d_methods.size(); j++ )
         {
             d_mx[ i.value()->d_methods[j]->d_name.constData() ].append( i.value()->d_methods[j].data() );
