@@ -22,6 +22,7 @@
 #include <QAbstractItemModel>
 #include <QApplication>
 #include <QFileDialog>
+#include <QMessageBox>
 #include <QTreeView>
 #include <QtDebug>
 using namespace St;
@@ -403,10 +404,12 @@ private:
         foreach( quint16 oop, oops )
         {
             quint16 cls = d_om->fetchClassOf(oop);
-            if( cls == 0x38 || cls == 0x28 || cls == 0x0e || cls == 0x84 || cls == 0x14 || cls == 0xcb0
+            if( cls == 0x38 || cls == 0x28 || cls == 0x0e || cls == 0x14 || cls == 0xcb0
                     || cls == 0x1a || cls == 0x1c )
-                continue; // no toplevel Symbol, String or Char, or Association, or Float, or Point, or Rectangle
+                continue; // no toplevel Symbol, String or Char, or Float, or Point, or Rectangle
             // or LargePositiveInteger
+            if( cls == 0x84 && !d_knowns.contains(oop) )
+                continue; // only known assocs
             Slot* s = new Slot();
             s->d_parent = &d_root;
             s->d_oop = oop;
@@ -442,7 +445,10 @@ bool ImageViewer::parse(const QString& path)
     if( !in.open(QIODevice::ReadOnly) )
         return false;
     const bool res = d_om->readFrom(&in);
-    d_mdl->setOm(d_om);
+    if( !res )
+        QMessageBox::critical(this,tr("Loading Smalltalk-80 Image"), tr("Incompatible format.") );
+    else
+        d_mdl->setOm(d_om);
     return res;
 }
 
@@ -453,7 +459,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Image Viewer");
-    a.setApplicationVersion("0.2");
+    a.setApplicationVersion("0.3");
     a.setStyle("Fusion");
 
     ImageViewer w;
