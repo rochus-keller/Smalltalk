@@ -26,7 +26,7 @@ using namespace St;
 // see http://www.wolczko.com/st80/manual.pdf.gz
 // and the Blue Book
 
-ObjectMemory::ObjectMemory()
+ObjectMemory::ObjectMemory(QObject* p):QObject(p)
 {
 
 }
@@ -98,19 +98,45 @@ bool ObjectMemory::readFrom(QIODevice* in)
 
     in->seek( 512 );
 
-    d_objectSpace = in->read( objectSpaceLenBytes ); // first word is oop_2
+    qDebug() << "object space" << objectSpaceLenBytes << "bytes, object table" << objectTableLenBytes << "bytes";
+
+    d_objectSpace = in->read( objectSpaceLenBytes );
     if( d_objectSpace.size() != objectSpaceLenBytes )
         return false;
 
     const int numOfPages = objectSpaceLenBytes / 512;
     const int off = 512 + ( numOfPages + 1 ) * 512;
     in->seek( off );
-    d_objectTable = in->read( objectTableLenBytes ); // first word is oop_0
+    d_objectTable = in->read( objectTableLenBytes );
     if( d_objectTable.size() != objectTableLenBytes )
         return false;
 
-    // printObjectTable(); // TEST
+    //printObjectTable(); // TEST
+    //printObjectSpace();
     return true;
+}
+
+QList<quint16> ObjectMemory::getAllValidOop() const
+{
+    QList<quint16> res;
+    for( int i = 0; i < d_objectTable.size(); i += 4 )
+    {
+        // i is byte number
+        const quint8 flags = quint8(d_objectTable[i+1]);
+        const quint16 oop = ( i >> 1 );
+        if( !isFree(flags) )
+            res << oop;
+    }
+    return res;
+}
+
+bool ObjectMemory::hasPointerMembers(quint16 objectPointer) const
+{
+    if( isInt(objectPointer) )
+        return false;
+    bool ptr;
+    getSpaceAddr( objectPointer, 0, &ptr );
+    return ptr;
 }
 
 quint16 ObjectMemory::fetchPointerOfObject(quint16 fieldIndex, quint16 objectPointer) const
@@ -125,7 +151,7 @@ void ObjectMemory::storePointerOfObject(quint16 fieldIndex, quint16 objectPointe
 {
     Data data = getDataOf( objectPointer );
     const quint32 off = fieldIndex * 2;
-    Q_ASSERT( data.d_isPtr && ( off + 1 ) < data.d_len && !isInt(withValue) );
+    Q_ASSERT( ( off + 1 ) < data.d_len && !isInt(withValue) );
     writeU16( d_objectSpace, data.d_pos + off, withValue );
 }
 
@@ -133,7 +159,7 @@ quint16 ObjectMemory::fetchWordOfObject(quint16 fieldIndex, quint16 objectPointe
 {
     Data data = getDataOf( objectPointer );
     const quint32 off = fieldIndex * 2;
-    Q_ASSERT( !data.d_isPtr && ( off + 1 ) < data.d_len );
+    Q_ASSERT( ( off + 1 ) < data.d_len );
     return readU16( d_objectSpace, data.d_pos + off );
 }
 
@@ -141,7 +167,7 @@ void ObjectMemory::storeWordOfObject(quint16 fieldIndex, quint16 objectPointer, 
 {
     Data data = getDataOf( objectPointer );
     const quint32 off = fieldIndex * 2;
-    Q_ASSERT( !data.d_isPtr && ( off + 1 ) < data.d_len );
+    Q_ASSERT( ( off + 1 ) < data.d_len );
     writeU16( d_objectSpace, data.d_pos + off, withValue );
 }
 
@@ -163,13 +189,26 @@ void ObjectMemory::storeByteOfObject(quint16 byteIndex, quint16 objectPointer, q
 
 quint16 ObjectMemory::fetchClassOf(quint16 objectPointer) const
 {
-    return getClassOf(objectPointer);
+    if( !isPointer(objectPointer) )
+        return classSmallInteger;
+    else
+        return getClassOf(objectPointer);
 }
 
 quint16 ObjectMemory::fetchByteLenghtOf(quint16 objectPointer) const
 {
+    if( isInt(objectPointer) )
+        return 0;
     Data data = getDataOf( objectPointer );
     return data.d_len;
+}
+
+quint16 ObjectMemory::fetchWordLenghtOf(quint16 objectPointer) const
+{
+    quint16 len = fetchByteLenghtOf(objectPointer);
+    if( len & 0x01 )
+        len++;
+    return len / 2;
 }
 
 quint16 ObjectMemory::instantiateClassWithPointers(quint16 classPointer, quint16 instanceSize)
@@ -185,6 +224,14 @@ quint16 ObjectMemory::instantiateClassWithWords(quint16 classPointer, quint16 in
 quint16 ObjectMemory::instantiateClassWithBytes(quint16 classPointer, quint16 instanceByteSize)
 {
     return createInstance(classPointer, instanceByteSize, false );
+}
+
+ObjectMemory::ByteString ObjectMemory::fetchByteString(quint16 objectPointer) const
+{
+    if( isInt(objectPointer) )
+        return ByteString(0,0);
+    Data d = getDataOf( objectPointer );
+    return ByteString( (quint8*) d_objectSpace.constData() + d.d_pos, d.d_len );
 }
 
 quint8 ObjectMemory::methodTemporaryCount(quint16 methodPointer) const
@@ -265,55 +312,137 @@ quint16 ObjectMemory::methodLiteral(quint16 methodPointer, quint8 index) const
     return readU16( d_objectSpace, d.d_pos + methHdrByteLen + byteIndex );
 }
 
-static inline QByteArray printData( const QByteArray& data )
+bool ObjectMemory::isPointer(quint16 ptr)
 {
+    return !isInt(ptr);
+}
+
+qint16 ObjectMemory::toInt(quint16 objectPointer)
+{
+    if( isInt(objectPointer) )
+    {
+        int res = ( objectPointer >> 1 );
+        if( objectPointer & 0x4000 )
+        {
+            res = -( ~res & 0x7fff ) - 1;
+            return res;
+        }else
+            return res;
+    }else
+        return 0;
+}
+
+static inline QByteArray printData( quint16 cls, const QByteArray& data, bool isPtr )
+{
+    if( cls == ObjectMemory::classString )
+    {
+        QByteArray str = data.constData();
+        str = str.simplified();
+        if( str.size() > 32 )
+            return "String: \"" + str + "\"... " + QByteArray::number(str.size());
+        else
+            return "String: \"" + str + "\"";
+    }else if( cls == 0x38 )
+    {
+        QByteArray str = data.constData();
+        return "Symbol: \"" + str + "\"";
+    }else if( cls == 0x28 )
+    {
+        // Q_ASSERT( isPtr );
+        quint16 ch = readU16(data,0);
+        // Q_ASSERT( !ObjectMemory::isPointer(ch) );
+        ch = ch >> 1;
+        return "Char: \"" + QByteArray(1,ch) + "\"";
+    }
     if( data.isEmpty() )
         return QByteArray();
+    /*
     QByteArray printable;
     int i = 0;
     while( i < data.size() && ::isprint(data[i]) )
         printable += data[i++];
     if( !printable.isEmpty() )
-        return "\"" + printable.simplified() + "\"";
-    else
-        return data.left(32).toHex() + ( data.size() > 32 ? "..." : "" );
+        return "printable: \"" + printable.simplified() + "\"";
+    else*/
+        return "data: " + data.left(16).toHex() + ( data.size() > 32 ? "..." : "" );
 }
 
 void ObjectMemory::printObjectTable()
 {
+    qDebug() << "************** OBJECT TABLE *******************";
+    // QHash<quint16,int> nameclasses;
     for( int i = 0; i < d_objectTable.size(); i += 4 )
     {
         // i is byte number
         const quint8 flags = quint8(d_objectTable[i+1]);
-        const quint16 loc = readU16(d_objectTable,i+2);
-        const quint8 seg = flags & 0xf;
-        const quint32 spaceAddr = ( seg << 16 ) + ( loc << 1 );
-        const quint16 size = readU16( d_objectSpace, spaceAddr );
+        const quint32 loc = readU16(d_objectTable,i+2); // loc is apparently the number of words (32k max)
+        const quint32 seg = flags & 0xf; // in Bits of History page 49: each segment contains 64k words!! (not bytes!!)
+        const quint32 spaceAddr = ( seg << 17 ) + ( loc << 1 );
+        const quint16 bytelen = readU16( d_objectSpace, spaceAddr ) * 2;
         const quint16 cls = readU16(d_objectSpace,spaceAddr+2);
-        const QByteArray objData = ( !isPtr(flags) ? d_objectSpace.mid(spaceAddr+4,size*2) : QByteArray() );
+        /*
+        QByteArray clsName;
+        if( fetchWordLenghtOf(cls) > 6 )
+        {
+            const quint16 name = fetchWordOfObject(6,cls);
+            const quint16 namecls = fetchClassOf(name);
+            if( namecls == classString )
+                clsName = (const char*)fetchByteString(name).d_bytes;
+            nameclasses[namecls]++;
+        }else
+            nameclasses[0]++;
+            */
+
+        const QByteArray objData = d_objectSpace.mid(spaceAddr+4,bytelen*2);
         qDebug() << "oop:" << QByteArray::number(i/2,16) // oop is the word number, not the byte number
                  << "count:" << QByteArray::number(quint8(d_objectTable[i])).constData()
                  //<< "flags:"
                  << ( isOdd(flags) ? "Odd" : "" ) << ( isPtr(flags) ? "Ptr" : "" ) << (isFree(flags) ? "Free" : "" )
                     << (flags & 0x10 ? "UnknFlag" : "" )
                  //<< "seg:" << ( seg )
-                 //<< "loc:" << QByteArray::number(loc,16)
-                 << "size:" << size // words
+                 //<< "loc:" << QByteArray::number(loc << 1,16)
+                 << "addr:" << spaceAddr
+                 << "bytelen:" << bytelen
                  << "class:" << QByteArray::number(cls,16) // entry into objectTable
-                 << "data:" << printData( objData ).constData();
+                 << printData( cls, objData, isPtr(flags) ).constData();
     }
+    // qDebug() << nameclasses;
 
     // oop with lsb bit set are smallintegers, not pointers
 }
 
+void ObjectMemory::printObjectSpace()
+{
+    qDebug() << "************** OBJECT SPACE *******************";
+
+    int i = 0;
+    while( i < d_objectSpace.size() )
+    {
+        quint16 len = readU16(d_objectSpace, i) * 2;
+        quint16 cls = readU16(d_objectSpace, i+2);
+        qDebug() << "addr:" << i << "seg:" << QByteArray::number( i >> 16, 16 ) <<
+                    "loc:" << QByteArray::number( i & 0xffff, 16 ) << "bytelen:" << len <<
+                    "class:" << QByteArray::number( cls, 16 ) <<
+                    printData( cls, QByteArray::fromRawData( d_objectSpace.constData() + i + 4, len - 4 ),
+                               false ).constData();
+        i += len;
+    }
+}
+
 quint32 ObjectMemory::getSpaceAddr(quint16 oop, bool* odd, bool* ptr ) const
 {
-    oop *= 2;
-    Q_ASSERT( ( oop + 4 ) < d_objectTable.size() );
-    const quint8 flags = quint8(d_objectTable[oop+1]);
-    const quint16 loc = readU16(d_objectTable,oop+2);
+    Q_ASSERT( !isInt(oop) );
+    const quint32 i = oop * 2;
+    if( ( i + 3 ) >= d_objectTable.size() )
+    {
+        qWarning() << "oop" << QByteArray::number(oop,16) << "out of object table, max oop"
+                   << QByteArray::number(d_objectTable.size()/2,16);
+        return 0;
+    }
+    const quint8 flags = quint8(d_objectTable[i+1]);
+    const quint16 loc = readU16(d_objectTable,i+2);
     const quint8 seg = flags & 0xf;
-    const quint32 spaceAddr = ( seg << 16 ) + ( loc << 1 );
+    const quint32 spaceAddr = ( seg << 17 ) + ( loc << 1 );
     if( odd )
         *odd = isOdd(flags);
     if( ptr )
@@ -334,9 +463,9 @@ ObjectMemory::Data ObjectMemory::getDataOf(quint16 oop, bool noHeader ) const
     res.d_pos = getSpaceAddr(oop, &odd, &ptr );
     res.d_isPtr = ptr;
     res.d_len = readU16( d_objectSpace, res.d_pos ) * 2;
-    if( odd )
-        res.d_len--;
-    Q_ASSERT( res.d_pos + res.d_len < d_objectSpace.size() );
+    //if( odd ) // no because the data is there anyway
+    //    res.d_len--;
+    Q_ASSERT( res.d_pos + res.d_len <= d_objectSpace.size() );
     if( noHeader )
     {
         res.d_pos += 4;

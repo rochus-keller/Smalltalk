@@ -20,13 +20,13 @@
 * http://www.gnu.org/copyleft/gpl.html.
 */
 
-#include <QByteArray>
+#include <QObject>
 
 class QIODevice;
 
 namespace St
 {
-    class ObjectMemory
+    class ObjectMemory : public QObject
     {
     public:
         // Objects known to the interpreter
@@ -98,9 +98,14 @@ namespace St
             ByteString(const quint8* b, quint16 l):d_bytes(b),d_len(l){}
         };
 
-        ObjectMemory();
+        ObjectMemory(QObject* p = 0);
         bool readFrom( QIODevice* );
 
+        QList<quint16> getAllValidOop() const;
+
+        // oop 0 is reserved as an invalid object pointer!
+
+        bool hasPointerMembers( quint16 objectPointer ) const;
         quint16 fetchPointerOfObject( quint16 fieldIndex, quint16 objectPointer ) const;
         void storePointerOfObject( quint16 fieldIndex, quint16 objectPointer, quint16 withValue );
         quint16 fetchWordOfObject( quint16 fieldIndex, quint16 objectPointer ) const;
@@ -109,9 +114,11 @@ namespace St
         void storeByteOfObject( quint16 byteIndex, quint16 objectPointer, quint8 withValue );
         quint16 fetchClassOf( quint16 objectPointer ) const;
         quint16 fetchByteLenghtOf( quint16 objectPointer ) const;
+        quint16 fetchWordLenghtOf( quint16 objectPointer ) const;
         quint16 instantiateClassWithPointers( quint16 classPointer, quint16 instanceSize );
         quint16 instantiateClassWithWords( quint16 classPointer, quint16 instanceSize );
         quint16 instantiateClassWithBytes( quint16 classPointer, quint16 instanceByteSize );
+        ByteString fetchByteString( quint16 objectPointer ) const;
 
         quint8 methodTemporaryCount( quint16 methodPointer ) const; // including args
         CompiledMethodFlags methodFlags( quint16 methodPointer ) const;
@@ -123,8 +130,12 @@ namespace St
         quint16 methodLiteral(quint16 methodPointer, quint8 index ) const;
         // last literal contains Association to superclass in case of super call
 
+        static bool isPointer(quint16);
+        static qint16 toInt(quint16 objectPointer );
+
     protected:
         void printObjectTable();
+        void printObjectSpace();
         quint32 getSpaceAddr(quint16 oop , bool* odd = 0, bool* ptr = 0) const;
         quint16 getClassOf( quint16 oop ) const;
         struct Data

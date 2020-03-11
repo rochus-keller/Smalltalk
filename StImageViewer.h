@@ -22,14 +22,23 @@
 
 #include <QMainWindow>
 
+class QTreeView;
+
 namespace St
 {
-class ImageViewer : public QMainWindow
-{
-public:
-    ImageViewer();
-    bool parse( const QString& path );
-};
+    class ObjectMemory;
+
+    class ImageViewer : public QMainWindow
+    {
+    public:
+        ImageViewer();
+        bool parse( const QString& path );
+    private:
+        ObjectMemory* d_om;
+        class Model;
+        Model* d_mdl;
+        QTreeView* d_tree;
+    };
 }
 
 #endif // STIMAGEVIEWER_H
