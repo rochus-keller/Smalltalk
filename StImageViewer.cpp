@@ -21,6 +21,7 @@
 #include "StObjectMemory.h"
 #include <QAbstractItemModel>
 #include <QApplication>
+#include <QDockWidget>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QTreeView>
@@ -75,14 +76,24 @@ public:
         return static_cast<QTreeView*>(QObject::parent());
     }
 
-    void setOm( ObjectMemory* om )
+    void setOm( ObjectMemory* om, quint16 root = 0 )
     {
         beginResetModel();
         d_root = Slot();
         d_om = om;
-        fillTop();
+        if( root )
+        {
+            const quint16 size = d_om->fetchWordLenghtOf( root );
+            d_root.d_oop = root;
+            d_root.d_kind = Slot::Frame;
+            if( size )
+                fill( &d_root, d_om->fetchClassOf(root), size, true );
+        }else
+            fillTop();
         endResetModel();
     }
+
+    ObjectMemory* getOm() const { return d_om; }
 
     quint16 getValue(const QModelIndex& index) const
     {
@@ -356,7 +367,7 @@ private:
         }
     }
 
-    void fill(Slot* super, quint16 cls, quint16 size )
+    void fill(Slot* super, quint16 cls, quint16 size, bool all = false )
     {
         if( cls == ObjectMemory::classCompiledMethod )
         {
@@ -375,7 +386,7 @@ private:
             super->d_children.append( s );
         }else
         {
-            const quint16 max = 50;
+            const quint16 max = all ? size : 50;
             Q_ASSERT( super->d_kind == Slot::Frame );
             for( int i = 0; i < qMin(size,max); i++ )
             {
@@ -429,14 +440,21 @@ private:
 ImageViewer::ImageViewer()
 {
     d_om = new ObjectMemory(this);
-    d_tree = new QTreeView(this);
-    d_tree->setAlternatingRowColors(true);
+    d_tree = new ObjectTree(this);
     d_mdl = new Model(d_tree);
     d_tree->setModel(d_mdl);
     setCentralWidget(d_tree);
 
+    setDockNestingEnabled(true);
+    setCorner( Qt::BottomRightCorner, Qt::RightDockWidgetArea );
+    setCorner( Qt::BottomLeftCorner, Qt::LeftDockWidgetArea );
+    setCorner( Qt::TopRightCorner, Qt::RightDockWidgetArea );
+    setCorner( Qt::TopLeftCorner, Qt::LeftDockWidgetArea );
+
     showMaximized();
     setWindowTitle(tr("%1 %2").arg(qApp->applicationName()).arg(qApp->applicationVersion()));
+
+    connect( d_tree, SIGNAL(sigObject(quint16)), SLOT(onObject(quint16)) );
 }
 
 bool ImageViewer::parse(const QString& path)
@@ -452,6 +470,39 @@ bool ImageViewer::parse(const QString& path)
     return res;
 }
 
+void ImageViewer::onObject(quint16 oop)
+{
+    QDockWidget* dock = new QDockWidget( tr("oop %1").arg(oop,0,16), this );
+    dock->setAllowedAreas( Qt::AllDockWidgetAreas );
+    dock->setFeatures( QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetClosable );
+    dock->setAttribute(Qt::WA_DeleteOnClose);
+    ObjectTree* tv = new ObjectTree();
+    ImageViewer::Model* m = new ImageViewer::Model(tv);
+    tv->setModel(m);
+    m->setOm( d_om, oop);
+    tv->expandToDepth(0);
+    dock->setWidget(tv);
+    addDockWidget( Qt::RightDockWidgetArea, dock );
+    connect( tv, SIGNAL(sigObject(quint16)), this, SLOT(onObject(quint16)) );
+}
+
+ObjectTree::ObjectTree(QWidget* p)
+{
+    setAlternatingRowColors(true);
+    setExpandsOnDoubleClick(false);
+    connect( this, SIGNAL(doubleClicked(QModelIndex)), this, SLOT(onDoubleClicked(QModelIndex)) );
+}
+
+void ObjectTree::setModel(ImageViewer::Model* m)
+{
+    d_mdl = m;
+    QTreeView::setModel(m);
+}
+
+void ObjectTree::onDoubleClicked(const QModelIndex& index)
+{
+    emit sigObject(d_mdl->getValue(index));
+}
 
 int main(int argc, char *argv[])
 {
@@ -459,7 +510,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Image Viewer");
-    a.setApplicationVersion("0.3");
+    a.setApplicationVersion("0.4");
     a.setStyle("Fusion");
 
     ImageViewer w;
@@ -476,3 +527,4 @@ int main(int argc, char *argv[])
     }
     return a.exec();
 }
+

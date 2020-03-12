@@ -21,23 +21,42 @@
 */
 
 #include <QMainWindow>
-
-class QTreeView;
+#include <QTreeView>
 
 namespace St
 {
     class ObjectMemory;
+    class ObjectTree;
 
     class ImageViewer : public QMainWindow
     {
+        Q_OBJECT
     public:
         ImageViewer();
         bool parse( const QString& path );
+    protected slots:
+        void onObject( quint16 );
     private:
+        friend class ObjectTree;
         ObjectMemory* d_om;
         class Model;
         Model* d_mdl;
-        QTreeView* d_tree;
+        ObjectTree* d_tree;
+    };
+
+    class ObjectTree : public QTreeView
+    {
+        Q_OBJECT
+    public:
+        ObjectTree(QWidget* p = 0);
+        void setModel(ImageViewer::Model*);
+        void expandTopLevel();
+    signals:
+        void sigObject( quint16 );
+    protected slots:
+        void onDoubleClicked(const QModelIndex&);
+    private:
+        ImageViewer::Model* d_mdl;
     };
 }
 
