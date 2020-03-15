@@ -125,6 +125,25 @@ bool ObjectMemory::readFrom(QIODevice* in)
         const quint16 cls = fetchClassOf(oop);
         d_classes << cls;
         d_classes << fetchPointerOfObject(0,cls); // superclass of cls
+        if( cls == classCompiledMethod )
+        {
+            for( int j = 0; j < methodLiteralCount(oop); j++ )
+            {
+                quint16 ptr = methodLiteral(j,oop);
+                if( !isInt(ptr) && ptr != objectNil && ptr != objectTrue && ptr != objectFalse )
+                    d_xref[ptr].append(oop);
+            }
+        }else if( hasPointerMembers(oop) )
+        {
+
+            const int len = fetchWordLenghtOf(oop);
+            for( int j = 0; j < len; j++ )
+            {
+                quint16 ptr = fetchWordOfObject(j,oop);
+                if( !isInt(ptr) && ptr != objectNil && ptr != objectTrue && ptr != objectFalse )
+                    d_xref[ptr].append(oop);
+            }
+        }
     }
 
     d_classes << classSmallInteger;
@@ -353,7 +372,7 @@ quint8 ObjectMemory::methodPrimitiveIndex(quint16 methodPointer) const
     return ( extension >> 1 ) & 0xff;
 }
 
-quint16 ObjectMemory::methodLiteral(quint16 methodPointer, quint8 index) const
+quint16 ObjectMemory::methodLiteral(quint8 index, quint16 methodPointer) const
 {
     Data d = getDataOf( methodPointer, false );
     Q_ASSERT( isCompiledMethod(d_objectSpace,d.d_pos) );

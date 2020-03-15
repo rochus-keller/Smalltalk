@@ -62,8 +62,10 @@ object table in a tree; known objects (as defined in the Blue Book part 4) and c
 by name; an object at a given oop can be expanded, so that object pointers can be followed; when clicking
 on an object or its class the details are presented in html format with navigable links; by CTRL-
 clicking on a list item or link a list or detail view opens with the given object as root. There is a
-dedicated list with all classes and metaclasses found in the image. Detail views of methods also
-show bytecode with descriptions.
+dedicated list with all classes and metaclasses found in the image, as well as a cross-reference list
+from where a given oop is referenced. Detail views of methods also show bytecode with descriptions.
+There is also a browsing history; you can go back or forward using the ALT+Left and ALT+Right keys.
+
 
 Here is a screenshot:
 

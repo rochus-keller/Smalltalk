@@ -25,6 +25,8 @@
 
 class QTreeWidget;
 class QTextBrowser;
+class QLabel;
+class QTreeWidgetItem;
 
 namespace St
 {
@@ -41,6 +43,8 @@ namespace St
         void createObjectTable();
         void createClasses();
         void fillClasses();
+        void createXref();
+        void fillXref(quint16);
         void createDetail();
         void closeEvent(QCloseEvent* event);
         void showDetail( quint16 );
@@ -53,10 +57,15 @@ namespace St
         void syncClasses(quint16);
         void syncObjects(quint16);
         static QPair<QString,int> bytecodeText(const quint8* , int pc);
+        void pushLocation(quint16);
     protected slots:
         void onObject( quint16 );
         void onClassesClicked();
         void onLink(const QUrl& );
+        void onLink( const QString& );
+        void onGoBack();
+        void onGoForward();
+        void onXrefClicked(QTreeWidgetItem*,int);
     private:
         friend class ObjectTree;
         ObjectMemory* d_om;
@@ -64,7 +73,12 @@ namespace St
         Model* d_mdl;
         ObjectTree* d_tree;
         QTreeWidget* d_classes;
+        QTreeWidget* d_xref;
+        QLabel* d_xrefTitle;
         QTextBrowser* d_detail;
+        QList<quint16> d_backHisto; // d_backHisto.last() is the current location
+        QList<quint16> d_forwardHisto;
+        bool d_pushBackLock;
     };
 
     class ObjectTree : public QTreeView

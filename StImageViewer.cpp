@@ -31,6 +31,9 @@
 #include <QDesktopWidget>
 #include <QCloseEvent>
 #include <QTextBrowser>
+#include <QVBoxLayout>
+#include <QLabel>
+#include <QShortcut>
 using namespace St;
 
 class ImageViewer::Model : public QAbstractItemModel
@@ -227,12 +230,13 @@ public:
                         break;
                     case Slot::Bytecode:
                         {
-                            QByteArray str((const char*)d_om->methodBytecodes(s->d_oop).d_bytes);
+                            ObjectMemory::ByteString bs = d_om->methodBytecodes(s->d_oop);
+                            QByteArray str((const char*)bs.d_bytes, bs.d_len );
                             const int len = 16;
-                            if( str.size() > len )
-                                return str.left(len).toHex() + "... (" + QByteArray::number(str.size()) + " bytes)";
+                            if( bs.d_len > len )
+                                return str.left(len).toHex() + "... (" + QByteArray::number(bs.d_len) + " bytes)";
                             else
-                                return str.toHex() + " (" + QByteArray::number(str.size()) + " bytes)";
+                                return str.toHex() + " (" + QByteArray::number(bs.d_len) + " bytes)";
                         }
                         break;
                     case Slot::Int:
@@ -393,7 +397,7 @@ public:
             {
                 Slot* s = new Slot();
                 s->d_parent = super;
-                s->d_oop = d_om->methodLiteral(super->d_oop, i);
+                s->d_oop = d_om->methodLiteral(i, super->d_oop);
                 setKind(s,d_om->fetchClassOf(s->d_oop));
                 super->d_children.append( s );
             }
@@ -455,7 +459,7 @@ public:
     QHash<quint16,QByteArray> d_knowns;
 };
 
-ImageViewer::ImageViewer()
+ImageViewer::ImageViewer():d_pushBackLock(false)
 {
     d_om = new ObjectMemory(this);
 
@@ -468,6 +472,7 @@ ImageViewer::ImageViewer()
     createObjectTable();
     createClasses();
     createDetail();
+    createXref();
 
     QSettings s;
 
@@ -483,6 +488,9 @@ ImageViewer::ImageViewer()
         restoreState( state.toByteArray() );
 
     setWindowTitle(tr("%1 %2").arg(qApp->applicationName()).arg(qApp->applicationVersion()));
+
+    new QShortcut(tr("ALT+LEFT"),this,SLOT(onGoBack()));
+    new QShortcut(tr("ALT+RIGHT"),this,SLOT(onGoForward()));
 }
 
 bool ImageViewer::parse(const QString& path)
@@ -495,6 +503,8 @@ bool ImageViewer::parse(const QString& path)
         QMessageBox::critical(this,tr("Loading Smalltalk-80 Image"), tr("Incompatible format.") );
     else
         d_mdl->setOm(d_om);
+    d_backHisto.clear();
+    d_forwardHisto.clear();
     fillClasses();
     return res;
 }
@@ -544,6 +554,51 @@ void ImageViewer::fillClasses()
         item->setData( 0, Qt::UserRole, meta );
     }
     d_classes->sortByColumn(0, Qt::AscendingOrder);
+}
+
+void ImageViewer::createXref()
+{
+    QDockWidget* dock = new QDockWidget( tr("Xref"), this );
+    dock->setObjectName("Xref");
+    dock->setAllowedAreas( Qt::AllDockWidgetAreas );
+    dock->setFeatures( QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetClosable );
+    QWidget* pane = new QWidget(dock);
+    QVBoxLayout* vbox = new QVBoxLayout(pane);
+    vbox->setMargin(0);
+    vbox->setSpacing(0);
+    d_xrefTitle = new QLabel(pane);
+    d_xrefTitle->setMargin(2);
+    d_xrefTitle->setWordWrap(true);
+    vbox->addWidget(d_xrefTitle);
+    d_xref = new QTreeWidget(pane);
+    d_xref->setAlternatingRowColors(true);
+    d_xref->setHeaderLabels(QStringList() << "oop" << "class");
+    d_xref->setRootIsDecorated(false);
+    vbox->addWidget(d_xref);
+    dock->setWidget(pane);
+    addDockWidget( Qt::RightDockWidgetArea, dock );
+    connect( d_xrefTitle, SIGNAL(linkActivated(QString)), this, SLOT(onLink(QString)) );
+    connect( d_xref, SIGNAL(itemClicked(QTreeWidgetItem*,int)), this, SLOT(onXrefClicked(QTreeWidgetItem*,int)) );
+}
+
+void ImageViewer::fillXref(quint16 oop)
+{
+    d_xref->clear();
+    const quint16 cls = d_om->fetchClassOf(oop);
+    const QByteArray name = d_om->fetchClassName(cls);
+    d_xrefTitle->setText( QString("oop %1 of <a href=\"oop:%2\">%3</a> is referenced by:").arg( oop, 0, 16 ).
+                          arg( cls, 0, 16).arg(name.constData()) );
+    QList<quint16> refs = d_om->getXref().value(oop);
+    std::sort( refs.begin(), refs.end() );
+    for( int i = 0; i < refs.size(); i++ )
+    {
+        QTreeWidgetItem* item = new QTreeWidgetItem( d_xref);
+        item->setText(0,QString::number(refs[i],16) );
+        item->setData(0,Qt::UserRole,refs[i]);
+        const quint16 cls = d_om->fetchClassOf(refs[i]);
+        item->setText( 1, d_om->fetchClassName(cls) );
+        item->setData(1, Qt::UserRole, cls );
+    }
 }
 
 void ImageViewer::createDetail()
@@ -736,7 +791,7 @@ QString ImageViewer::methodDetailText(quint16 oop)
         for( int i = 0; i < len; i++ )
         {
             out << "<tr><td>" << i << "</td> <td>";
-            quint16 val = d_om->methodLiteral(oop, i);
+            quint16 val = d_om->methodLiteral(i, oop);
             out << prettyValue(val);
             out << "</td></tr>";
         }
@@ -910,8 +965,10 @@ QPair<QString, int> ImageViewer::bytecodeText(const quint8* bc, int pc)
     if( b >= 172 && b <= 175 )
         return qMakePair( QString("Pop and Jump On False %1 *256+%2").arg( b & 0x3 ).arg( bc[pc+1] ), 2 );
     if( b >= 176 && b <= 191 )
+        // see array 0x30 specialSelectors
         return qMakePair( QString("Send Arithmetic Message #%1" ).arg( b & 0xf ), 1 );
     if( b >= 192 && b <= 207 )
+        // see array 0x30 specialSelectors
         return qMakePair( QString("Send Special Message #%1" ).arg( b & 0xf ), 1 );
     if( b >= 208 && b <= 223 )
         return qMakePair( QString("Send Literal Selector #%1 With No Arguments" ).arg( b & 0xf ), 1 );
@@ -923,6 +980,16 @@ QPair<QString, int> ImageViewer::bytecodeText(const quint8* bc, int pc)
     Q_ASSERT( false );
 
     return qMakePair(QString(),1);
+}
+
+void ImageViewer::pushLocation(quint16 oop)
+{
+    if( d_pushBackLock )
+        return;
+    if( !d_backHisto.isEmpty() && d_backHisto.last() == oop )
+        return; // o ist bereits oberstes Element auf dem Stack.
+    d_backHisto.removeAll( oop );
+    d_backHisto.push_back( oop );
 }
 
 void ImageViewer::onObject(quint16 oop)
@@ -946,6 +1013,8 @@ void ImageViewer::onObject(quint16 oop)
     {
         showDetail(oop);
         syncClasses(oop);
+        fillXref(oop);
+        pushLocation(oop);
     }
 }
 
@@ -958,7 +1027,8 @@ void ImageViewer::onClassesClicked()
     const quint16 oop = item->data(0,Qt::UserRole).toUInt();
     syncObjects(oop);
     showDetail(oop);
-    // TODO
+    fillXref(oop);
+    pushLocation(oop);
 }
 
 void ImageViewer::onLink(const QUrl& url)
@@ -986,7 +1056,61 @@ void ImageViewer::onLink(const QUrl& url)
         showDetail(oop);
         syncClasses(oop);
         syncObjects(oop);
+        fillXref(oop);
+        pushLocation(oop);
     }
+}
+
+void ImageViewer::onLink(const QString& link)
+{
+    if( !link.startsWith( "oop:" ) )
+        return;
+    quint16 oop = link.mid(4).toUInt(0,16);
+    showDetail(oop);
+    syncClasses(oop);
+    syncObjects(oop);
+    fillXref(oop);
+    pushLocation(oop);
+}
+
+void ImageViewer::onGoBack()
+{
+    if( d_backHisto.size() <= 1 )
+        return;
+
+    d_pushBackLock = true;
+    d_forwardHisto.push_back( d_backHisto.last() );
+    d_backHisto.pop_back();
+    const quint16 oop = d_backHisto.last();
+    showDetail(oop);
+    syncClasses(oop);
+    syncObjects(oop);
+    fillXref(oop);
+
+    d_pushBackLock = false;
+}
+
+void ImageViewer::onGoForward()
+{
+    if( d_forwardHisto.isEmpty() )
+        return;
+    quint16 oop = d_forwardHisto.last();
+    d_forwardHisto.pop_back();
+    showDetail(oop);
+    syncClasses(oop);
+    syncObjects(oop);
+    fillXref(oop);
+    pushLocation(oop);
+}
+
+void ImageViewer::onXrefClicked(QTreeWidgetItem* item, int col)
+{
+    quint16 oop = item->data(col,Qt::UserRole).toUInt();
+    showDetail(oop);
+    syncClasses(oop);
+    syncObjects(oop);
+    fillXref(oop);
+    pushLocation(oop);
 }
 
 ObjectTree::ObjectTree(QWidget* p)
@@ -1017,7 +1141,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Image Viewer");
-    a.setApplicationVersion("0.5");
+    a.setApplicationVersion("0.6");
     a.setStyle("Fusion");
 
     ImageViewer w;

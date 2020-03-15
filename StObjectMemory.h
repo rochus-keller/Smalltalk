@@ -109,6 +109,8 @@ namespace St
         const QSet<quint16>& getObjects() const {return d_objects; }
         const QSet<quint16>& getClasses() const {return d_classes; }
         const QSet<quint16>& getMetaClasses() const {return d_metaClasses; }
+        typedef QHash<quint16, QList<quint16> > Xref;
+        const Xref& getXref() const { return d_xref; }
 
         // oop 0 is reserved as an invalid object pointer!
 
@@ -136,7 +138,7 @@ namespace St
         ByteString methodBytecodes( quint16 methodPointer ) const;
         quint8 methodArgumentCount(quint16 methodPointer ) const;
         quint8 methodPrimitiveIndex(quint16 methodPointer ) const;
-        quint16 methodLiteral(quint16 methodPointer, quint8 index ) const;
+        quint16 methodLiteral(quint8 index, quint16 methodPointer ) const;
         // last literal contains Association to superclass in case of super call
 
         static bool isPointer(quint16);
@@ -164,6 +166,7 @@ namespace St
         // objects are stored continuously, no segment boundaries
         // all objectTable entries are the same size
         QSet<quint16> d_objects, d_classes, d_metaClasses;
+        Xref d_xref;
     };
 }
 
