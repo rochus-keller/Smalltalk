@@ -59,12 +59,15 @@ Here are some screenshots:
 With the Image Viewer one can inspect the contents of the original Smalltalk-80 Virtual Image in the
 interchange format provided at http://www.wolczko.com/st80/image.tar.gz. The viewer presents the
 object table in a tree; known objects (as defined in the Blue Book part 4) and classes are printed
-by name; an object at a given oop can be expanded, so that object pointers can be followed; by double-
-clicking on an object a detail view opens with the given object as root.
+by name; an object at a given oop can be expanded, so that object pointers can be followed; when clicking
+on an object or its class the details are presented in html format with navigable links; by CTRL-
+clicking on a list item or link a list or detail view opens with the given object as root. There is a
+dedicated list with all classes and metaclasses found in the image. Detail views of methods also
+show bytecode with descriptions.
 
 Here is a screenshot:
 
-![Overview](http://software.rochus-keller.info/smalltalk80_image_viewer_0.4.png)
+![Overview](http://software.rochus-keller.info/smalltalk80_image_viewer_0.5.png)
 
 
 ### Binary versions

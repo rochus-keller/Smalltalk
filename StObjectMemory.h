@@ -21,6 +21,7 @@
 */
 
 #include <QObject>
+#include <QSet>
 
 class QIODevice;
 
@@ -72,6 +73,9 @@ namespace St
             // selectors
             specialSelectors = 0x30, // SystemDictionary class variable, the array of selectors for bytecodes 260-317 octal
             characterTable = 0x32, // Character class variable, table of characters
+
+            // extra knowns
+            classSymbol = 0x38,
         };
 
         enum CompiledMethodFlags {
@@ -102,6 +106,9 @@ namespace St
         bool readFrom( QIODevice* );
 
         QList<quint16> getAllValidOop() const;
+        const QSet<quint16>& getObjects() const {return d_objects; }
+        const QSet<quint16>& getClasses() const {return d_classes; }
+        const QSet<quint16>& getMetaClasses() const {return d_metaClasses; }
 
         // oop 0 is reserved as an invalid object pointer!
 
@@ -115,10 +122,12 @@ namespace St
         quint16 fetchClassOf( quint16 objectPointer ) const;
         quint16 fetchByteLenghtOf( quint16 objectPointer ) const;
         quint16 fetchWordLenghtOf( quint16 objectPointer ) const;
+        ByteString fetchByteString( quint16 objectPointer ) const;
+
         quint16 instantiateClassWithPointers( quint16 classPointer, quint16 instanceSize );
         quint16 instantiateClassWithWords( quint16 classPointer, quint16 instanceSize );
         quint16 instantiateClassWithBytes( quint16 classPointer, quint16 instanceByteSize );
-        ByteString fetchByteString( quint16 objectPointer ) const;
+        QByteArray fetchClassName( quint16 classPointer ) const;
 
         quint8 methodTemporaryCount( quint16 methodPointer ) const; // including args
         CompiledMethodFlags methodFlags( quint16 methodPointer ) const;
@@ -154,6 +163,7 @@ namespace St
         QByteArray d_objectTable; // first word is oop_0; entries are oop or unused (freeEntry bit set)
         // objects are stored continuously, no segment boundaries
         // all objectTable entries are the same size
+        QSet<quint16> d_objects, d_classes, d_metaClasses;
     };
 }
 

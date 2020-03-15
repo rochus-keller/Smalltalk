@@ -111,6 +111,36 @@ bool ObjectMemory::readFrom(QIODevice* in)
     if( d_objectTable.size() != objectTableLenBytes )
         return false;
 
+    d_objects.clear();
+    d_classes.clear();
+    d_metaClasses.clear();
+
+    for( int i = 0; i < d_objectTable.size(); i += 4 )
+    {
+        // i is byte number
+        const quint16 oop = i >> 1;
+        if( d_objects.contains(oop) )
+            continue;
+        d_objects << oop;
+        const quint16 cls = fetchClassOf(oop);
+        d_classes << cls;
+        d_classes << fetchPointerOfObject(0,cls); // superclass of cls
+    }
+
+    d_classes << classSmallInteger;
+
+    d_objects -= d_classes;
+
+    foreach( quint16 cls, d_classes )
+    {
+        const quint16 nameId = fetchPointerOfObject(6, cls);
+        const quint16 nameCls = fetchClassOf(nameId);
+        if( cls == nameCls && cls != classSymbol )
+            d_metaClasses << cls;
+        // d_metaClasses << fetchClassOf(cls);
+    }
+    d_classes -= d_metaClasses;
+
     //printObjectTable(); // TEST
     //printObjectSpace();
     return true;
@@ -234,6 +264,27 @@ ObjectMemory::ByteString ObjectMemory::fetchByteString(quint16 objectPointer) co
     return ByteString( (quint8*) d_objectSpace.constData() + d.d_pos, d.d_len );
 }
 
+QByteArray ObjectMemory::fetchClassName(quint16 classPointer) const
+{
+    if( d_classes.contains(classPointer) )
+    {
+        const quint16 sym = fetchPointerOfObject(6, classPointer);
+        //Q_ASSERT( fetchClassOf(sym) == classSymbol );
+        return (const char*)fetchByteString(sym).d_bytes;
+    }else if( d_metaClasses.contains(classPointer) )
+    {
+        const quint16 nameId = fetchPointerOfObject(6, classPointer);
+        //const quint16 nameCls = fetchClassOf(nameId);
+        //Q_ASSERT( nameCls != classSymbol );
+        //Q_ASSERT( nameCls == classPointer );
+        const quint16 sym = fetchWordOfObject(6, nameId);
+        //Q_ASSERT( fetchClassOf(sym) == classSymbol );
+        const ByteString bs = fetchByteString(sym);
+        return QByteArray((const char*)bs.d_bytes) + " class";
+    }
+    return QByteArray();
+}
+
 quint8 ObjectMemory::methodTemporaryCount(quint16 methodPointer) const
 {
     Data d = getDataOf( methodPointer, false );
@@ -342,7 +393,7 @@ static inline QByteArray printData( quint16 cls, const QByteArray& data, bool is
             return "String: \"" + str + "\"... " + QByteArray::number(str.size());
         else
             return "String: \"" + str + "\"";
-    }else if( cls == 0x38 )
+    }else if( cls == ObjectMemory::classSymbol )
     {
         QByteArray str = data.constData();
         return "Symbol: \"" + str + "\"";
