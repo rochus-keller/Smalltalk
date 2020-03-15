@@ -74,9 +74,9 @@ Here is a screenshot:
 
 ### Binary versions
 
-Here is a binary version of the Class Browser for Windows: http://software.rochus-keller.info/St80ClassBrowser_win32.zip.
-Just unpack the ZIP somewhere on your drive and double-click St80ClassBrowser.exe; Qt libraries are included as well as the 
-original Smalltalk-80.sources file.
+Here is a binary version of the Class Browser and Image Viewer for Windows: http://software.rochus-keller.info/St80Tools_win32.zip.
+Just unpack the ZIP somewhere on your drive and double-click St80ClassBrowser.exe or St80ImageViewer.exe; Qt libraries are included as well as the 
+original Smalltalk-80.sources and virtual image file.
 
 ### Build Steps
 
