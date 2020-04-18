@@ -19,6 +19,7 @@
 
 #include "StImageViewer.h"
 #include "StObjectMemory.h"
+#include "StObjectMemory2.h"
 #include <QAbstractItemModel>
 #include <QApplication>
 #include <QDockWidget>
@@ -75,7 +76,7 @@ public:
         d_knowns.insert(0x32,"characterTable");
 
         // empirical additions, not in the Blue Book
-        d_knowns.insert(ObjectMemory::classSymbol, "Symbol");
+        d_knowns.insert(ST_OBJECT_MEMORY::classSymbol, "Symbol");
         d_knowns.insert(0x84, "Association");
     }
 
@@ -84,7 +85,7 @@ public:
         return static_cast<QTreeView*>(QObject::parent());
     }
 
-    void setOm( ObjectMemory* om, quint16 root = 0 )
+    void setOm( ST_OBJECT_MEMORY* om, quint16 root = 0 )
     {
         beginResetModel();
         d_root = Slot();
@@ -101,7 +102,7 @@ public:
         endResetModel();
     }
 
-    ObjectMemory* getOm() const { return d_om; }
+    ST_OBJECT_MEMORY* getOm() const { return d_om; }
 
     quint16 getValue(const QModelIndex& index) const
     {
@@ -230,7 +231,7 @@ public:
                         break;
                     case Slot::Bytecode:
                         {
-                            ObjectMemory::ByteString bs = d_om->methodBytecodes(s->d_oop);
+                            ST_OBJECT_MEMORY::ByteString bs = d_om->methodBytecodes(s->d_oop);
                             QByteArray str((const char*)bs.d_bytes, bs.d_len );
                             const int len = 16;
                             if( bs.d_len > len )
@@ -240,7 +241,7 @@ public:
                         }
                         break;
                     case Slot::Int:
-                        return QString::number(ObjectMemory::toInt(s->d_oop));
+                        return QString::number(ST_OBJECT_MEMORY::toInt(s->d_oop));
                     case Slot::Continuation:
                         return QString("another %1 entries").arg(s->d_oop);
                     }
@@ -362,17 +363,17 @@ public:
     {
         switch( cls )
         {
-        case ObjectMemory::classString:
+        case ST_OBJECT_MEMORY::classString:
         case 0x38: // Symbol
             s->d_kind = Slot::String;
             break;
-        case ObjectMemory::classCharacter: // Char
+        case ST_OBJECT_MEMORY::classCharacter: // Char
             s->d_kind = Slot::Character;
             break;
-        case ObjectMemory::classCompiledMethod:
+        case ST_OBJECT_MEMORY::classCompiledMethod:
             s->d_kind = Slot::Method;
             break;
-        case ObjectMemory::classSmallInteger:
+        case ST_OBJECT_MEMORY::classSmallInteger:
             s->d_kind = Slot::Int;
             break;
         default:
@@ -391,7 +392,7 @@ public:
 
     void fill(Slot* super, quint16 cls, quint16 size, bool all = false )
     {
-        if( cls == ObjectMemory::classCompiledMethod )
+        if( cls == ST_OBJECT_MEMORY::classCompiledMethod )
         {
             for( int i = 0; i < d_om->methodLiteralCount(super->d_oop); i++ )
             {
@@ -455,13 +456,13 @@ public:
     }
 
     Slot d_root;
-    ObjectMemory* d_om;
+    ST_OBJECT_MEMORY* d_om;
     QHash<quint16,QByteArray> d_knowns;
 };
 
 ImageViewer::ImageViewer():d_pushBackLock(false)
 {
-    d_om = new ObjectMemory(this);
+    d_om = new ST_OBJECT_MEMORY(this);
 
     setDockNestingEnabled(true);
     setCorner( Qt::BottomRightCorner, Qt::RightDockWidgetArea );
@@ -502,7 +503,10 @@ bool ImageViewer::parse(const QString& path)
     if( !res )
         QMessageBox::critical(this,tr("Loading Smalltalk-80 Image"), tr("Incompatible format.") );
     else
+    {
+        d_om->collectGarbage();
         d_mdl->setOm(d_om);
+    }
     d_backHisto.clear();
     d_forwardHisto.clear();
     fillClasses();
@@ -628,8 +632,8 @@ void ImageViewer::showDetail(quint16 oop)
 
 QString ImageViewer::detailText(quint16 oop)
 {
-    if( !ObjectMemory::isPointer(oop) )
-        return QString("SmallInteger %1").arg( ObjectMemory::toInt(oop) );
+    if( !ST_OBJECT_MEMORY::isPointer(oop) )
+        return QString("SmallInteger %1").arg( ST_OBJECT_MEMORY::toInt(oop) );
     else if( d_om->getObjects().contains(oop) )
         return objectDetailText(oop);
     else if( oop )
@@ -642,7 +646,7 @@ QString ImageViewer::objectDetailText(quint16 oop)
 {
     const quint16 cls = d_om->fetchClassOf(oop);
 
-    if( cls == ObjectMemory::classCompiledMethod )
+    if( cls == ST_OBJECT_MEMORY::classCompiledMethod )
         return methodDetailText(oop);
 
     QString html;
@@ -722,7 +726,7 @@ QString ImageViewer::classDetailText(quint16 cls)
     out << "<br>";
 
     const quint16 vars = d_om->fetchPointerOfObject(4,cls);
-    if( vars != ObjectMemory::objectNil )
+    if( vars != ST_OBJECT_MEMORY::objectNil )
     {
         out << "<h3>Fields</h3>";
         const quint16 len = d_om->fetchWordLenghtOf(vars);
@@ -742,7 +746,7 @@ QString ImageViewer::classDetailText(quint16 cls)
     for( int i = 0; i < len; i++ )
     {
         const quint16 meth = d_om->fetchPointerOfObject(i,arr);
-        if( meth == ObjectMemory::objectNil )
+        if( meth == ST_OBJECT_MEMORY::objectNil )
             continue;
         const quint16 sym = d_om->fetchPointerOfObject(i+2,md);
         list << qMakePair( QString( (const char*)d_om->fetchByteString(sym).d_bytes ), meth );
@@ -777,9 +781,9 @@ QString ImageViewer::methodDetailText(quint16 oop)
     const quint16 flags = d_om->methodFlags(oop);
     if( prim )
         out << "<b>primitive:</b> " << prim << "<br>";
-    else if( flags == ObjectMemory::ZeroArgPrimitiveReturnSelf )
+    else if( flags == ST_OBJECT_MEMORY::ZeroArgPrimitiveReturnSelf )
         out << "<b>primitive:</b> return self<br>";
-    else if( flags == ObjectMemory::ZeroArgPrimitiveReturnVar )
+    else if( flags == ST_OBJECT_MEMORY::ZeroArgPrimitiveReturnVar )
         out << "<b>primitive:</b> return field " << d_om->methodPrimitiveIndex(oop) << "<br>";
 
     const quint16 len = d_om->methodLiteralCount(oop);
@@ -798,7 +802,7 @@ QString ImageViewer::methodDetailText(quint16 oop)
         out << "</table>";
     }
 
-    ObjectMemory::ByteString bs = d_om->methodBytecodes(oop);
+    ST_OBJECT_MEMORY::ByteString bs = d_om->methodBytecodes(oop);
     if( bs.d_len > 0 )
     {
         out << "<h3>Bytecode</h3>";
@@ -830,11 +834,11 @@ QByteArrayList ImageViewer::fieldList(quint16 cls, bool recursive)
     if( recursive )
     {
         const quint16 super = d_om->fetchPointerOfObject(0,cls);
-        if( super != ObjectMemory::objectNil )
+        if( super != ST_OBJECT_MEMORY::objectNil )
             res = fieldList(super,recursive);
     }
     const quint16 vars = d_om->fetchPointerOfObject(4,cls);
-    if( vars != ObjectMemory::objectNil )
+    if( vars != ST_OBJECT_MEMORY::objectNil )
     {
         const quint16 len = d_om->fetchWordLenghtOf(vars);
         for( int i = 0; i < len; i++ )
@@ -851,10 +855,10 @@ QByteArray ImageViewer::prettyValue(quint16 val)
     const quint16 cls = d_om->fetchClassOf(val);
     switch( cls )
     {
-    case ObjectMemory::classSmallInteger:
-        return QByteArray::number(ObjectMemory::toInt(val));
+    case ST_OBJECT_MEMORY::classSmallInteger:
+        return QByteArray::number(ST_OBJECT_MEMORY::toInt(val));
         break;
-    case ObjectMemory::classCharacter:
+    case ST_OBJECT_MEMORY::classCharacter:
         {
             quint16 ch = d_om->fetchWordOfObject(0,val);
             ch = ch >> 1;
@@ -864,8 +868,8 @@ QByteArray ImageViewer::prettyValue(quint16 val)
                 return "0x" + QByteArray::number(ch,16);
         }
         break;
-    case ObjectMemory::classSymbol:
-    case ObjectMemory::classString:
+    case ST_OBJECT_MEMORY::classSymbol:
+    case ST_OBJECT_MEMORY::classString:
         return "\"" + QByteArray((const char*)d_om->fetchByteString(val).d_bytes) + "\"";
         break;
     default:
@@ -1141,7 +1145,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Image Viewer");
-    a.setApplicationVersion("0.6");
+    a.setApplicationVersion("0.6.1");
     a.setStyle("Fusion");
 
     ImageViewer w;

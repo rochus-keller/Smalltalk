@@ -22,38 +22,164 @@
 
 #include <QObject>
 #include <QVector>
-#include <Smalltalk/StObjectMemory.h>
+#include <Smalltalk/StObjectMemory2.h>
 
 namespace St
 {
     class Interpreter : public QObject
     {
     public:
-        Interpreter(QObject* p = 0);
+        typedef quint16 OOP;
+        enum MethodContext { SenderIndex = 0, InstructionPointerIndex = 1,
+                             StackPointerIndex = 2, MethodIndex = 3, ReceiverIndex = 5,
+                           TempFrameStart = 6 };
+        enum BlockContext { CallerIndex = 0, BlockArgumentCountIndex = 3, InitialIPIndex = 4,
+                            HomeIndex = 5 };
+        enum Registers { ActiveContext, HomeContext, Method, Receiver, MessageSelector, NewMethod };
 
-    private:
-        ObjectMemory d_om;
-
-        // this interpreter does not support access to thisContext; it's nil instead.
-
-        struct Context // for both Methods and Blocks
-        {
-            Context* home; // 0 for MethodContext
-            union {
-                quint16 sender; // for MethodContext
-                quint16 caller; // for BlockContext
-            };
-            quint16 receiver; // not used in BlockContext
-            quint16 pc; // instructionPointer
-            union {
-                quint16 method; // for MethodContext;
-                quint16 initialPc; // for BlockContext;
-            };
-            ObjectMemory::ByteString byteCode;
-            QVector<quint16> stack;
-            quint8 stackPointer; // top of stack
-            quint8 argumentCount;
+        enum ClassIndizes {
+            SuperClassIndex = 0,
+            MessageDictIndex = 1,
+            InstanceSpecIndex = 2,
         };
+
+        enum ProcessScheduler {
+            ProcessListIndex = 0,
+            ActiveProcessIndex = 1
+        };
+
+        Interpreter(QObject* p = 0);
+        void setOm( ObjectMemory2* om );
+        void interpret();
+        void cycle();
+    protected:
+        qint16 instructionPointerOfContext( OOP contextPointer );
+        void storeInstructionPointerValueInContext( qint16 value, OOP contextPointer );
+        qint16 stackPointerOfContext( OOP contextPointer );
+        void storeStackPointerValueInContext( qint16 value, OOP contextPointer );
+        qint16 argumentCountOfBlock( OOP blockPointer );
+        bool isBlockContext( OOP contextPointer );
+        void fetchContextRegisters();
+        void storeContextRegisters();
+        void push( OOP value );
+        OOP popStack();
+        OOP stackTop();
+        OOP stackValue(qint16 offset);
+        void pop(quint16 number );
+        void unPop(quint16 number );
+        void newActiveContext( OOP aContext );
+        OOP sender();
+        OOP caller();
+        OOP temporary( qint16 offset );
+        OOP literal(qint16 offset);
+        OOP lookupMethodInDictionary(OOP dictionary, OOP selector);
+        OOP lookupMethodInClass(OOP cls, OOP selector);
+        OOP superclassOf(OOP cls);
+        OOP instanceSpecificationOf( OOP cls );
+        bool isPointers( OOP cls );
+        bool isWords( OOP cls );
+        bool isIndexable( OOP cls );
+        qint16 fixedFieldsOf( OOP cls );
+        quint8 fetchByte();
+        void checkProcessSwitch();
+        void dispatchOnThisBytecode();
+        bool stackBytecode();
+        bool returnBytecode();
+        bool sendBytecode();
+        bool jumpBytecode();
+        bool pushReceiverVariableBytecode();
+        bool pushTemporaryVariableBytecode();
+        bool pushLiteralConstantBytecode();
+        bool pushLiteralVariableBytecode();
+        bool storeAndPopReceiverVariableBytecode();
+        bool storeAndPopTemoraryVariableBytecode();
+        bool pushReceiverBytecode();
+        bool pushConstantBytecode();
+        bool extendedPushBytecode();
+        bool extendedStoreBytecode();
+        bool extendedStoreAndPopBytecode();
+        bool popStackBytecode();
+        bool duplicateTopBytecode();
+        bool pushActiveContextBytecode();
+        bool shortUnconditionalJump();
+        bool shortContidionalJump();
+        bool longUnconditionalJump();
+        bool longConditionalJump();
+        bool extendedSendBytecode();
+        bool singleExtendedSendBytecode();
+        bool doubleExtendedSendBytecode();
+        bool singleExtendedSuperBytecode();
+        bool doubleExtendedSuperBytecode();
+        bool sendSpecialSelectorBytecode();
+        bool sendLiteralSelectorBytecode();
+        void jump( quint32 offset);
+        void jumpif( quint16 condition, quint32 offset );
+        void sendSelector( OOP selector, quint16 argumentCount );
+        void sendSelectorToClass( OOP classPointer );
+        void executeNewMethod();
+        bool primitiveResponse();
+        void activateNewMethod();
+        void transfer( quint32 count, quint16 fromIndex, OOP fromOop, quint16 firstTo, OOP toOop );
+        bool specialSelectorPrimitiveResponse();
+        void nilContextFields();
+        void returnToActiveContext( OOP aContext );
+        void returnValue( OOP resultPointer, OOP contextPointer );
+        void initPrimitive();
+        void successUpdate( bool ); // original name success(value)
+        OOP primitiveFail();
+        qint16 popInteger();
+        void pushInteger(qint16);
+        bool isIntegerValue(int);
+        OOP positive16BitIntegerFor(int);
+        int positive16BitValueOf(OOP);
+        void arithmeticSelectorPrimitive();
+        void commonSelectorPrimitive();
+        bool isIntegerObject(OOP);
+        void primitiveAdd();
+        void primitiveSubtract();
+        void primitiveLessThan();
+        void primitiveGreaterThan();
+        void primitiveLessOrEqual();
+        void primitiveGreaterOrEqual();
+        void primitiveEqual();
+        void primitiveNotEqual();
+        void primitiveMultiply();
+        void primitiveDivide();
+        void primitiveMod();
+        void primitiveMakePoint();
+        void primitiveBitShift();
+        void primitiveDiv();
+        void primitiveBitAnd();
+        void primitiveBitOr();
+        qint16 fetchIntegerOfObject(quint16 fieldIndex, OOP objectPointer );
+        void storeIntegerOfObjectWithValue(quint16 fieldIndex, OOP objectPointer, int integerValue );
+        void primitiveEquivalent();
+        void primitiveClass();
+        void primitiveBlockCopy();
+        void primitiveValue();
+        // NOP void quickReturnSelf();
+        void quickInstanceLoad();
+        void dispatchPrimitives();
+        void dispatchArithmeticPrimitives();
+        void dispatchSubscriptAndStreamPrimitives();
+        void dispatchStorageManagementPrimitives();
+        void dispatchControlPrimitives();
+        void dispatchInputOutputPrimitives();
+        void dispatchSystemPrimitives();
+        void dispatchPrivatePrimitives();
+        void dispatchIntegerPrimitives();
+        void dispatchLargeIntegerPrimitives();
+        void dispatchFloatPrimitives();
+        void _addSubMulImp(char op);
+        void primitiveQuo();
+        void primitiveBitXor();
+        void _compareImp(char op);
+        void _bitImp(char op);
+    private:
+        ObjectMemory2* d_om;
+        qint16 stackPointer, instructionPointer, argumentCount, primitiveIndex;
+        quint8 currentBytecode;
+        bool d_run, success;
     };
 }
 

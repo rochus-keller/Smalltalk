@@ -1,7 +1,7 @@
 #/*
 #* Copyright 2020 Rochus Keller <mailto:me@rochus-keller.ch>
 #*
-#* This file is part of the Smalltalk ClassBrowser application.
+#* This file is part of the Smalltalk Interpreter application.
 #*
 #* The following is the license that applies to this copy of the
 #* application. For a license to use the application under conditions
@@ -21,20 +21,20 @@ QT       += core gui
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
-TARGET = St80ImageViewer
+TARGET = St80VirtualMachine
 TEMPLATE = app
 
 INCLUDEPATH += ..
 
 SOURCES +=\
-    StImageViewer.cpp \
-    StObjectMemory.cpp \
-    StObjectMemory2.cpp
+    StInterpreter.cpp \
+    StObjectMemory2.cpp \
+    StVirtualMachine.cpp
 
 HEADERS  += \
-    StImageViewer.h \
-    StObjectMemory.h \
-    StObjectMemory2.h
+    StInterpreter.h \
+    StObjectMemory2.h \
+    StVirtualMachine.h
 
 
 CONFIG(debug, debug|release) {

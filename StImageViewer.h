@@ -28,9 +28,11 @@ class QTextBrowser;
 class QLabel;
 class QTreeWidgetItem;
 
+#define ST_OBJECT_MEMORY ObjectMemory2
+
 namespace St
 {
-    class ObjectMemory;
+    class ST_OBJECT_MEMORY;
     class ObjectTree;
 
     class ImageViewer : public QMainWindow
@@ -68,7 +70,7 @@ namespace St
         void onXrefClicked(QTreeWidgetItem*,int);
     private:
         friend class ObjectTree;
-        ObjectMemory* d_om;
+        ST_OBJECT_MEMORY* d_om;
         class Model;
         Model* d_mdl;
         ObjectTree* d_tree;
