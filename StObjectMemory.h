@@ -76,6 +76,7 @@ namespace St
 
             // extra knowns
             classSymbol = 0x38,
+            classMethodDictionary = 0x4c,
         };
 
         enum CompiledMethodFlags {

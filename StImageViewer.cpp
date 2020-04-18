@@ -177,75 +177,11 @@ public:
                     if( !str.isEmpty() )
                         return str;
                     else
-                    {
                         return d_om->fetchClassName(cls);
-#if 0
-                        const quint16 nameId = d_om->fetchWordOfObject(6,cls);
-                        const quint16 nameCls = d_om->fetchClassOf(nameId);
-                        if( nameCls == 0x38 )
-                        {
-                            str = (const char*)d_om->fetchByteString(nameId).d_bytes;
-                            if( !str.isEmpty() )
-                                return str;
-                        }else if( nameCls == cls )
-                        {
-                            const quint16 nameId2 = d_om->fetchWordOfObject(6,s->d_oop);
-                            const quint16 nameCls2 = d_om->fetchClassOf(nameId2);
-                            if( nameCls2 == 0x38 )
-                            {
-                                str = (const char*)d_om->fetchByteString(nameId2).d_bytes;
-                                if( !str.isEmpty() )
-                                    return str + " class";
-                            }
-                        }
-                        return QByteArray::number( cls, 16 );
-#endif
-                    }
                 }
                 break;
             case 2:
-                {
-                    switch( s->d_kind )
-                    {
-                    case Slot::String:
-                        return "\"" + QByteArray((const char*)d_om->fetchByteString(s->d_oop).d_bytes) + "\"";
-                    case Slot::Character:
-                        {
-                            quint16 ch = d_om->fetchWordOfObject(0,s->d_oop);
-                            ch = ch >> 1;
-                            if( ::isprint(ch) )
-                                return "'" + QByteArray(1,ch) + "'";
-                            else
-                                return "0x" + QByteArray::number(ch,16);
-                        }
-                        break;
-                    case Slot::Chunk:
-                        {
-                            QByteArray str((const char*)d_om->fetchByteString(s->d_oop).d_bytes);
-                            const int len = 16;
-                            if( str.size() > len )
-                                return str.left(len).toHex() + "... (" + QByteArray::number(str.size()) + " bytes)";
-                            else
-                                return str.toHex() + " (" + QByteArray::number(str.size()) + " bytes)";
-                        }
-                        break;
-                    case Slot::Bytecode:
-                        {
-                            ST_OBJECT_MEMORY::ByteString bs = d_om->methodBytecodes(s->d_oop);
-                            QByteArray str((const char*)bs.d_bytes, bs.d_len );
-                            const int len = 16;
-                            if( bs.d_len > len )
-                                return str.left(len).toHex() + "... (" + QByteArray::number(bs.d_len) + " bytes)";
-                            else
-                                return str.toHex() + " (" + QByteArray::number(bs.d_len) + " bytes)";
-                        }
-                        break;
-                    case Slot::Int:
-                        return QString::number(ST_OBJECT_MEMORY::toInt(s->d_oop));
-                    case Slot::Continuation:
-                        return QString("another %1 entries").arg(s->d_oop);
-                    }
-                }
+                return stringOfValue(s);
             }
             break;
         case Qt::ToolTipRole:
@@ -390,6 +326,52 @@ public:
         }
     }
 
+    QString stringOfValue( Slot* s ) const
+    {
+        switch( s->d_kind )
+        {
+        case Slot::String:
+            return "\"" + QByteArray((const char*)d_om->fetchByteString(s->d_oop).d_bytes) + "\"";
+        case Slot::Character:
+            {
+                quint16 ch = d_om->fetchWordOfObject(0,s->d_oop);
+                ch = ch >> 1;
+                if( ::isprint(ch) )
+                    return "'" + QByteArray(1,ch) + "'";
+                else
+                    return "0x" + QByteArray::number(ch,16);
+            }
+            break;
+        case Slot::Chunk:
+            {
+                ST_OBJECT_MEMORY::ByteString bs = d_om->fetchByteString(s->d_oop);
+                const QByteArray str = QByteArray::fromRawData((const char*)bs.d_bytes, bs.d_len);
+                const int len = 16;
+                if( str.size() > len )
+                    return str.left(len).toHex() + "... (" + QByteArray::number(str.size()) + " bytes)";
+                else
+                    return str.toHex() + " (" + QByteArray::number(str.size()) + " bytes)";
+            }
+            break;
+        case Slot::Bytecode:
+            {
+                ST_OBJECT_MEMORY::ByteString bs = d_om->methodBytecodes(s->d_oop);
+                const QByteArray str = QByteArray::fromRawData((const char*)bs.d_bytes, bs.d_len );
+                const int len = 16;
+                if( bs.d_len > len )
+                    return str.left(len).toHex() + "... (" + QByteArray::number(bs.d_len) + " bytes)";
+                else
+                    return str.toHex() + " (" + QByteArray::number(bs.d_len) + " bytes)";
+            }
+            break;
+        case Slot::Int:
+            return QString::number(ST_OBJECT_MEMORY::toInt(s->d_oop));
+        case Slot::Continuation:
+            return QString("another %1 entries").arg(s->d_oop);
+        }
+        return QString();
+    }
+
     void fill(Slot* super, quint16 cls, quint16 size, bool all = false )
     {
         if( cls == ST_OBJECT_MEMORY::classCompiledMethod )
@@ -474,6 +456,7 @@ ImageViewer::ImageViewer():d_pushBackLock(false)
     createClasses();
     createDetail();
     createXref();
+    createInsts();
 
     QSettings s;
 
@@ -504,7 +487,7 @@ bool ImageViewer::parse(const QString& path)
         QMessageBox::critical(this,tr("Loading Smalltalk-80 Image"), tr("Incompatible format.") );
     else
     {
-        d_om->collectGarbage();
+        //d_om->collectGarbage();
         d_mdl->setOm(d_om);
     }
     d_backHisto.clear();
@@ -590,7 +573,7 @@ void ImageViewer::fillXref(quint16 oop)
     d_xref->clear();
     const quint16 cls = d_om->fetchClassOf(oop);
     const QByteArray name = d_om->fetchClassName(cls);
-    d_xrefTitle->setText( QString("oop %1 of <a href=\"oop:%2\">%3</a> is referenced by:").arg( oop, 0, 16 ).
+    d_xrefTitle->setText( QString("oop %1 of <a href=\"oop:%2\">%3</a> is member of:").arg( oop, 0, 16 ).
                           arg( cls, 0, 16).arg(name.constData()) );
     QList<quint16> refs = d_om->getXref().value(oop);
     std::sort( refs.begin(), refs.end() );
@@ -603,6 +586,62 @@ void ImageViewer::fillXref(quint16 oop)
         item->setText( 1, d_om->fetchClassName(cls) );
         item->setData(1, Qt::UserRole, cls );
     }
+}
+
+void ImageViewer::createInsts()
+{
+    QDockWidget* dock = new QDockWidget( tr("Instances"), this );
+    dock->setObjectName("Insts");
+    dock->setAllowedAreas( Qt::AllDockWidgetAreas );
+    dock->setFeatures( QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetClosable );
+    QWidget* pane = new QWidget(dock);
+    QVBoxLayout* vbox = new QVBoxLayout(pane);
+    vbox->setMargin(0);
+    vbox->setSpacing(0);
+    d_instsTitle = new QLabel(pane);
+    d_instsTitle->setMargin(2);
+    d_instsTitle->setWordWrap(true);
+    vbox->addWidget(d_instsTitle);
+    d_insts = new QTreeWidget(pane);
+    d_insts->setAlternatingRowColors(true);
+    d_insts->setHeaderLabels(QStringList() << "oop" << "value");
+    d_insts->setRootIsDecorated(false);
+    vbox->addWidget(d_insts);
+    dock->setWidget(pane);
+    addDockWidget( Qt::RightDockWidgetArea, dock );
+    connect( d_instsTitle, SIGNAL(linkActivated(QString)), this, SLOT(onLink(QString)) );
+    connect( d_insts, SIGNAL(itemClicked(QTreeWidgetItem*,int)), this, SLOT(onInstsClicked(QTreeWidgetItem*,int)) );
+}
+
+void ImageViewer::fillInsts(quint16 cls)
+{
+    d_insts->clear();
+    d_instsTitle->setText(tr("(no class)"));
+    if( d_om->getObjects().contains(cls) )
+        return;
+    const QByteArray name = d_om->fetchClassName(cls);
+    QList<quint16> objs = d_om->getAllValidOop();
+    for( int i = 0; i < objs.size(); i++ )
+    {
+        if( d_om->fetchClassOf( objs[i] ) == cls )
+        {
+            QTreeWidgetItem* item = new QTreeWidgetItem( d_insts);
+            item->setText(0,QString::number(objs[i],16) );
+            item->setData(0,Qt::UserRole,objs[i]);
+            if( d_om->getClasses().contains( objs[i] ) )
+                item->setText( 1, d_om->fetchClassName(objs[i]) );
+            else
+            {
+                const quint16 cls = d_om->fetchClassOf(objs[i]);
+                Model::Slot s;
+                s.d_oop = objs[i];
+                d_mdl->setKind( &s, cls );
+                item->setText( 1, d_mdl->stringOfValue( &s ) );
+            }
+        }
+    }
+    d_instsTitle->setText( QString("class %1 <a href=\"oop:%2\">%3</a> %4 instances:").arg( cls, 0, 16 ).
+                          arg( cls, 0, 16).arg(name.constData()).arg(d_insts->topLevelItemCount()) );
 }
 
 void ImageViewer::createDetail()
@@ -648,6 +687,11 @@ QString ImageViewer::objectDetailText(quint16 oop)
 
     if( cls == ST_OBJECT_MEMORY::classCompiledMethod )
         return methodDetailText(oop);
+    if( cls == 0 )
+    {
+        d_om->fetchClassOf(oop);
+        return QString();
+    }
 
     QString html;
     QTextStream out(&html);
@@ -709,7 +753,7 @@ QString ImageViewer::classDetailText(quint16 cls)
     const quint16 clscls = d_om->fetchClassOf(cls);
 
     out << "<html>";
-    out << "<h2>" << d_om->fetchClassName(cls) << "</h2>";
+    out << "<h2>" << d_om->fetchClassName(cls) << " " << QString::number(cls,16) << "</h2>";
     out << "<b>class:</b> <a href=\"oop:" << QString::number(clscls,16) << "\">" << d_om->fetchClassName(clscls) << "</a><br>";
     const quint16 super = d_om->fetchPointerOfObject(0,cls);
     out << "<b>superclass:</b> <a href=\"oop:" << QString::number(super,16) << "\">" << d_om->fetchClassName(super) << "</a><br>";
@@ -774,6 +818,12 @@ QString ImageViewer::methodDetailText(quint16 oop)
 
     out << "<html>";
     out << "<h2>Method " << QString::number(oop,16) << "</h2>";
+    QPair<quint16,quint16> selCls = findSelectorAndClass(oop);
+    if( selCls.second != 0 )
+        out << "<b>defined in:</b> " << "<a href=\"oop:" + QByteArray::number(selCls.second,16) + "\">" +
+               d_om->fetchClassName(selCls.second) + "</a><br>";
+    if( selCls.first != 0 )
+        out << "<b>selector:</b> " << (const char*)d_om->fetchByteString(selCls.first).d_bytes << "<br>";
     const quint16 args = d_om->methodArgumentCount(oop);
     out << "<b>arguments:</b> " << args << "<br>";
     out << "<b>temporaries:</b> " << ( d_om->methodTemporaryCount(oop) - args ) << "<br>";
@@ -879,6 +929,7 @@ QByteArray ImageViewer::prettyValue(quint16 val)
             return "<a href=\"oop:" + QByteArray::number(val,16) + "\">" + QByteArray::number(val,16) + "</a>";
         break;
     }
+    return QByteArray();
 }
 
 void ImageViewer::syncClasses(quint16 oop)
@@ -996,6 +1047,42 @@ void ImageViewer::pushLocation(quint16 oop)
     d_backHisto.push_back( oop );
 }
 
+QPair<quint16, quint16> ImageViewer::findSelectorAndClass(quint16 methodOop) const
+{
+    quint16 sym = 0;
+    quint16 cls = 0;
+    foreach( quint16 arr, d_om->getXref().value(methodOop) )
+    {
+        if( d_om->fetchClassOf(arr) == ST_OBJECT_MEMORY::classArray )
+        {
+            foreach( quint16 dict, d_om->getXref().value(arr) )
+            {
+                if( d_om->fetchClassOf(dict) == ST_OBJECT_MEMORY::classMethodDictionary )
+                {
+                    bool found = false;
+                    int i;
+                    for( i = 0; i < d_om->fetchWordLenghtOf(arr); i++ )
+                    {
+                        if( d_om->fetchWordOfObject(i,arr) == methodOop )
+                        {
+                            found = true;
+                            break;
+                        }
+                    }
+                    Q_ASSERT( found );
+                    sym = d_om->fetchWordOfObject( i + 2, dict );
+                    foreach( quint16 cls, d_om->getXref().value(dict) )
+                    {
+                        if( d_om->getClasses().contains(cls) || d_om->getMetaClasses().contains(cls) )
+                            return qMakePair(sym,cls);
+                    }
+                }
+            }
+        }
+    }
+    return qMakePair(sym,cls);
+}
+
 void ImageViewer::onObject(quint16 oop)
 {
     if( QApplication::keyboardModifiers() == Qt::ControlModifier )
@@ -1018,6 +1105,7 @@ void ImageViewer::onObject(quint16 oop)
         showDetail(oop);
         syncClasses(oop);
         fillXref(oop);
+        fillInsts(oop);
         pushLocation(oop);
     }
 }
@@ -1032,6 +1120,7 @@ void ImageViewer::onClassesClicked()
     syncObjects(oop);
     showDetail(oop);
     fillXref(oop);
+    fillInsts(oop);
     pushLocation(oop);
 }
 
@@ -1061,6 +1150,7 @@ void ImageViewer::onLink(const QUrl& url)
         syncClasses(oop);
         syncObjects(oop);
         fillXref(oop);
+        fillInsts(oop);
         pushLocation(oop);
     }
 }
@@ -1074,6 +1164,7 @@ void ImageViewer::onLink(const QString& link)
     syncClasses(oop);
     syncObjects(oop);
     fillXref(oop);
+    fillInsts(oop);
     pushLocation(oop);
 }
 
@@ -1089,6 +1180,7 @@ void ImageViewer::onGoBack()
     showDetail(oop);
     syncClasses(oop);
     syncObjects(oop);
+    fillInsts(oop);
     fillXref(oop);
 
     d_pushBackLock = false;
@@ -1104,6 +1196,7 @@ void ImageViewer::onGoForward()
     syncClasses(oop);
     syncObjects(oop);
     fillXref(oop);
+    fillInsts(oop);
     pushLocation(oop);
 }
 
@@ -1114,7 +1207,38 @@ void ImageViewer::onXrefClicked(QTreeWidgetItem* item, int col)
     syncClasses(oop);
     syncObjects(oop);
     fillXref(oop);
+    fillInsts(oop);
     pushLocation(oop);
+}
+
+void ImageViewer::onInstsClicked(QTreeWidgetItem* item, int)
+{
+    quint16 oop = item->data(0,Qt::UserRole).toUInt();
+
+    if( QApplication::keyboardModifiers() == Qt::ControlModifier )
+    {
+        QDockWidget* dock = new QDockWidget( tr("oop %1").arg(oop,0,16), this );
+        dock->setObjectName("OopX");
+        dock->setAllowedAreas( Qt::AllDockWidgetAreas );
+        dock->setFeatures( QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetClosable );
+        dock->setAttribute(Qt::WA_DeleteOnClose);
+        ObjectTree* tv = new ObjectTree();
+        ImageViewer::Model* m = new ImageViewer::Model(tv);
+        tv->setModel(m);
+        m->setOm( d_om, oop);
+        tv->expandToDepth(0);
+        dock->setWidget(tv);
+        addDockWidget( Qt::RightDockWidgetArea, dock );
+        connect( tv, SIGNAL(sigObject(quint16)), this, SLOT(onObject(quint16)) );
+    }else
+    {
+        showDetail(oop);
+        syncClasses(oop);
+        syncObjects(oop);
+        fillXref(oop);
+        fillInsts(oop);
+        pushLocation(oop);
+    }
 }
 
 ObjectTree::ObjectTree(QWidget* p)
@@ -1145,7 +1269,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Image Viewer");
-    a.setApplicationVersion("0.6.1");
+    a.setApplicationVersion("0.7.0");
     a.setStyle("Fusion");
 
     ImageViewer w;

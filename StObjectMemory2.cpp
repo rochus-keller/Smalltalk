@@ -156,8 +156,7 @@ bool ObjectMemory2::readFrom(QIODevice* in)
         if( slot.isFree() )
             continue;
         const quint16 oop = i << 1;
-        if( d_objects.contains(oop) )
-            continue;
+        Q_ASSERT( !d_objects.contains(oop) );
         d_objects << oop;
 
         const OOP cls = slot.getClass();
@@ -194,9 +193,17 @@ bool ObjectMemory2::readFrom(QIODevice* in)
         const quint16 nameCls = fetchClassOf(nameId);
         if( cls == nameCls && cls != classSymbol )
             d_metaClasses << cls;
-        // d_metaClasses << fetchClassOf(cls);
     }
     d_classes -= d_metaClasses;
+
+    QSet<quint16> corrections;
+    foreach( quint16 obj, d_objects )
+    {
+        if( d_metaClasses.contains(fetchClassOf(obj)) )
+            corrections.insert(obj); // obj is actually a class but was not identified because it has no instances
+    }
+    d_objects -= corrections;
+    d_classes += corrections;
 
     return true;
 }
