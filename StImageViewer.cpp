@@ -273,8 +273,7 @@ public:
 
         const quint16 cls = d_om->fetchClassOf(s->d_oop);
 
-        const_cast<Model*>(this)->fill(s, cls, size);
-        return true;
+        return const_cast<Model*>(this)->fill(s, cls, size);
     }
 
     Qt::ItemFlags flags( const QModelIndex & index ) const
@@ -286,7 +285,7 @@ public:
 
     struct Slot
     {
-        enum Kind { Frame, Int, String, Character, Chunk, Method, Continuation, Bytecode };
+        enum Kind { Frame, Int, String, Character, Float, Chunk, Method, Continuation, Bytecode };
         quint16 d_oop;
         quint8 d_kind;
         QList<Slot*> d_children;
@@ -303,8 +302,11 @@ public:
         case 0x38: // Symbol
             s->d_kind = Slot::String;
             break;
-        case ST_OBJECT_MEMORY::classCharacter: // Char
+        case ST_OBJECT_MEMORY::classCharacter:
             s->d_kind = Slot::Character;
+            break;
+        case ST_OBJECT_MEMORY::classFloat:
+            s->d_kind = Slot::Float;
             break;
         case ST_OBJECT_MEMORY::classCompiledMethod:
             s->d_kind = Slot::Method;
@@ -342,6 +344,13 @@ public:
                     return "0x" + QByteArray::number(ch,16);
             }
             break;
+        case Slot::Float:
+            {
+                ST_OBJECT_MEMORY::ByteString bs = d_om->fetchByteString(s->d_oop);
+                const QByteArray str = QByteArray::fromRawData((const char*)bs.d_bytes, bs.d_len).toHex();
+                return QString("%1 = %2").arg( str.constData() ).arg( d_om->fetchFloat(s->d_oop) );
+            }
+            break;
         case Slot::Chunk:
             {
                 ST_OBJECT_MEMORY::ByteString bs = d_om->fetchByteString(s->d_oop);
@@ -365,22 +374,22 @@ public:
             }
             break;
         case Slot::Int:
-            return QString::number(ST_OBJECT_MEMORY::toInt(s->d_oop));
+            return QString::number(ST_OBJECT_MEMORY::integerValueOf(s->d_oop));
         case Slot::Continuation:
             return QString("another %1 entries").arg(s->d_oop);
         }
         return QString();
     }
 
-    void fill(Slot* super, quint16 cls, quint16 size, bool all = false )
+    bool fill(Slot* super, quint16 cls, quint16 size, bool all = false )
     {
         if( cls == ST_OBJECT_MEMORY::classCompiledMethod )
         {
-            for( int i = 0; i < d_om->methodLiteralCount(super->d_oop); i++ )
+            for( int i = 0; i < d_om->literalCountOf(super->d_oop); i++ )
             {
                 Slot* s = new Slot();
                 s->d_parent = super;
-                s->d_oop = d_om->methodLiteral(i, super->d_oop);
+                s->d_oop = d_om->literalOfMethod(i, super->d_oop);
                 setKind(s,d_om->fetchClassOf(s->d_oop));
                 super->d_children.append( s );
             }
@@ -389,7 +398,8 @@ public:
             s->d_oop = super->d_oop;
             s->d_kind = Slot::Bytecode;
             super->d_children.append( s );
-        }else
+            return true;
+        }else if( d_om->hasPointerMembers(super->d_oop) )
         {
             const quint16 max = all ? size : 50;
             Q_ASSERT( super->d_kind == Slot::Frame );
@@ -409,7 +419,9 @@ public:
                 s->d_kind = Slot::Continuation;
                 super->d_children.append( s );
             }
-        }
+            return true;
+        }else
+            return false;
     }
 
     void fillTop()
@@ -672,7 +684,7 @@ void ImageViewer::showDetail(quint16 oop)
 QString ImageViewer::detailText(quint16 oop)
 {
     if( !ST_OBJECT_MEMORY::isPointer(oop) )
-        return QString("SmallInteger %1").arg( ST_OBJECT_MEMORY::toInt(oop) );
+        return QString("SmallInteger %1").arg( ST_OBJECT_MEMORY::integerValueOf(oop) );
     else if( d_om->getObjects().contains(oop) )
         return objectDetailText(oop);
     else if( oop )
@@ -824,19 +836,19 @@ QString ImageViewer::methodDetailText(quint16 oop)
                d_om->fetchClassName(selCls.second) + "</a><br>";
     if( selCls.first != 0 )
         out << "<b>selector:</b> " << (const char*)d_om->fetchByteString(selCls.first).d_bytes << "<br>";
-    const quint16 args = d_om->methodArgumentCount(oop);
+    const quint16 args = d_om->argumentCountOf(oop);
     out << "<b>arguments:</b> " << args << "<br>";
-    out << "<b>temporaries:</b> " << ( d_om->methodTemporaryCount(oop) - args ) << "<br>";
-    const quint16 prim = d_om->methodPrimitiveIndex(oop);
-    const quint16 flags = d_om->methodFlags(oop);
+    out << "<b>temporaries:</b> " << ( d_om->temporaryCountOf(oop) - args ) << "<br>";
+    const quint16 prim = d_om->primitiveIndexOf(oop);
+    const quint16 flags = d_om->flagValueOf(oop);
     if( prim )
         out << "<b>primitive:</b> " << prim << "<br>";
     else if( flags == ST_OBJECT_MEMORY::ZeroArgPrimitiveReturnSelf )
         out << "<b>primitive:</b> return self<br>";
     else if( flags == ST_OBJECT_MEMORY::ZeroArgPrimitiveReturnVar )
-        out << "<b>primitive:</b> return field " << d_om->methodPrimitiveIndex(oop) << "<br>";
+        out << "<b>primitive:</b> return field " << d_om->primitiveIndexOf(oop) << "<br>";
 
-    const quint16 len = d_om->methodLiteralCount(oop);
+    const quint16 len = d_om->literalCountOf(oop);
     if( len > 0 )
     {
         out << "<h3>Literals</h3>";
@@ -845,7 +857,7 @@ QString ImageViewer::methodDetailText(quint16 oop)
         for( int i = 0; i < len; i++ )
         {
             out << "<tr><td>" << i << "</td> <td>";
-            quint16 val = d_om->methodLiteral(i, oop);
+            quint16 val = d_om->literalOfMethod(i, oop);
             out << prettyValue(val);
             out << "</td></tr>";
         }
@@ -906,7 +918,7 @@ QByteArray ImageViewer::prettyValue(quint16 val)
     switch( cls )
     {
     case ST_OBJECT_MEMORY::classSmallInteger:
-        return QByteArray::number(ST_OBJECT_MEMORY::toInt(val));
+        return QByteArray::number(ST_OBJECT_MEMORY::integerValueOf(val));
         break;
     case ST_OBJECT_MEMORY::classCharacter:
         {
@@ -1269,7 +1281,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Image Viewer");
-    a.setApplicationVersion("0.7.0");
+    a.setApplicationVersion("0.7.1");
     a.setStyle("Fusion");
 
     ImageViewer w;

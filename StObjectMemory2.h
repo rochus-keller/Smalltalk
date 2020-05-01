@@ -48,7 +48,7 @@ namespace St
             objectTrue = 0x06,
 
             // root
-            processor = 0x08, // an Association whose value field is Processor
+            processor = 0x08, // an Association whose value field is Processor, SchedulerAssociationPointer
             smalltalk = 0x12, // an Association whose value field is SystemDirectory
 
             // classes
@@ -109,12 +109,14 @@ namespace St
         const QSet<quint16>& getObjects() const {return d_objects; }
         const QSet<quint16>& getClasses() const {return d_classes; }
         const QSet<quint16>& getMetaClasses() const {return d_metaClasses; }
+        int getOopsLeft() const;
         typedef QHash<quint16, QList<quint16> > Xref;
         const Xref& getXref() const { return d_xref; }
         void setRegister( quint8 index, quint16 value );
         quint16 getRegister( quint8 index ) const;
         void addTemp(OOP oop);
         void removeTemp(OOP oop);
+        OOP getNextInstance( OOP cls, OOP cur = 0 ) const;
 
         // oop 0 is reserved as an invalid object pointer!
 
@@ -129,28 +131,36 @@ namespace St
         quint16 fetchByteLenghtOf( OOP objectPointer ) const;
         quint16 fetchWordLenghtOf( OOP objectPointer ) const;
         ByteString fetchByteString( OOP objectPointer ) const;
+        float fetchFloat( OOP objectPointer ) const;
+        void storeFloat( OOP objectPointer, float v );
+        void swapPointersOf( OOP firstPointer, OOP secondPointer );
+        bool hasObject(OOP) const;
 
         OOP instantiateClassWithPointers( OOP classPointer, quint16 instanceSize );
         OOP instantiateClassWithWords( OOP classPointer, quint16 instanceSize );
         OOP instantiateClassWithBytes( OOP classPointer, quint16 instanceByteSize );
         QByteArray fetchClassName( OOP classPointer ) const;
 
-        quint8 methodTemporaryCount( OOP methodPointer ) const; // including args
-        CompiledMethodFlags methodFlags( OOP methodPointer ) const;
-        bool methodLargeContext( OOP methodPointer ) const;
-        quint8 methodLiteralCount( OOP methodPointer ) const;
+        quint8 temporaryCountOf( OOP methodPointer ) const; // including args
+        CompiledMethodFlags flagValueOf( OOP methodPointer ) const;
+        bool largeContextFlagOf( OOP methodPointer ) const;
+        quint8 literalCountOf( OOP methodPointer ) const;
+        quint8 literalCountOfHeader(OOP header ) const;
         ByteString methodBytecodes( OOP methodPointer ) const;
-        quint8 methodArgumentCount(OOP methodPointer ) const;
-        quint8 methodPrimitiveIndex(OOP methodPointer ) const;
-        OOP methodLiteral(quint8 index, OOP methodPointer ) const;
-        quint32 methodInitialInstructionPointer( OOP methodPointer ) const;
+        quint8 argumentCountOf(OOP methodPointer ) const;
+        quint8 primitiveIndexOf(OOP methodPointer ) const;
+        OOP literalOfMethod(quint8 index, OOP methodPointer ) const;
+        quint32 initialInstructionPointerOfMethod( OOP methodPointer ) const;
         OOP methodClassOf( OOP methodPointer ) const;
-        quint8 methodFieldIndex( OOP methodPointer ) const { return methodTemporaryCount(methodPointer); }
+        quint8 fieldIndexOf( OOP methodPointer ) const { return temporaryCountOf(methodPointer); }
+        quint16 objectPointerCountOf( OOP methodPointer ) const { return literalCountOf(methodPointer) + 1; }
         // last literal contains Association to superclass in case of super call
 
         static bool isPointer(OOP);
-        static qint16 toInt(OOP objectPointer );
-        static OOP toPtr(qint16 value );
+        static bool isIntegerObject(OOP objectPointer);
+        static qint16 integerValueOf(OOP objectPointer );
+        static OOP integerObjectOf(qint16 value );
+        static bool isIntegerValue(int);
 
     protected:
         int findFreeSlot();

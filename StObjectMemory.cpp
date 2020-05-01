@@ -20,6 +20,7 @@
 #include "StObjectMemory.h"
 #include <QIODevice>
 #include <QtDebug>
+#include <QtMath>
 using namespace St;
 
 // According to "Smalltalk-80: Virtual Image Version 2", Xerox PARC, 1983
@@ -127,9 +128,9 @@ bool ObjectMemory::readFrom(QIODevice* in)
         d_classes << fetchPointerOfObject(0,cls); // superclass of cls
         if( cls == classCompiledMethod )
         {
-            for( int j = 0; j < methodLiteralCount(oop); j++ )
+            for( int j = 0; j < literalCountOf(oop); j++ )
             {
-                quint16 ptr = methodLiteral(j,oop);
+                quint16 ptr = literalOfMethod(j,oop);
                 if( !isInt(ptr) && ptr != objectNil && ptr != objectTrue && ptr != objectFalse )
                     d_xref[ptr].append(oop);
             }
@@ -292,6 +293,21 @@ ObjectMemory::ByteString ObjectMemory::fetchByteString(quint16 objectPointer) co
     return ByteString( (quint8*) d_objectSpace.constData() + d.d_pos, d.d_len );
 }
 
+float ObjectMemory::fetchFloat(quint16 objectPointer) const
+{
+    union {
+        float f;
+        quint32 w;
+    };
+#ifdef _DEBUG
+    // The BB corresponds to the IEEE 754 32 bit floating point version
+    w = 0x4048f5c2; // 3.14 rounded
+    Q_ASSERT( qFabs( f - 3.1399998 ) < 0.0000001 );
+#endif
+    w = fetchWordOfObject(0,objectPointer) << 16 | fetchWordOfObject(1,objectPointer);
+    return f;
+}
+
 QByteArray ObjectMemory::fetchClassName(quint16 classPointer) const
 {
     if( d_classes.contains(classPointer) )
@@ -313,28 +329,28 @@ QByteArray ObjectMemory::fetchClassName(quint16 classPointer) const
     return QByteArray();
 }
 
-quint8 ObjectMemory::methodTemporaryCount(quint16 methodPointer) const
+quint8 ObjectMemory::temporaryCountOf(quint16 methodPointer) const
 {
     Data d = getDataOf( methodPointer, false );
     Q_ASSERT( isCompiledMethod(d_objectSpace,d.d_pos) );
     return d_objectSpace[ d.d_pos + methHdrByteLen - 2] & 0x1f;
 }
 
-ObjectMemory::CompiledMethodFlags ObjectMemory::methodFlags(quint16 methodPointer) const
+ObjectMemory::CompiledMethodFlags ObjectMemory::flagValueOf(quint16 methodPointer) const
 {
     Data d = getDataOf( methodPointer, false );
     Q_ASSERT( isCompiledMethod(d_objectSpace,d.d_pos) );
     return CompiledMethodFlags( getMethodFlags( d_objectSpace, d.d_pos ) );
 }
 
-bool ObjectMemory::methodLargeContext(quint16 methodPointer) const
+bool ObjectMemory::largeContextFlagOf(quint16 methodPointer) const
 {
     Data d = getDataOf( methodPointer, false );
     Q_ASSERT( isCompiledMethod(d_objectSpace,d.d_pos) );
     return quint8( d_objectSpace[ d.d_pos + methHdrByteLen - 1 ] ) & 0x80;
 }
 
-quint8 ObjectMemory::methodLiteralCount(quint16 methodPointer) const
+quint8 ObjectMemory::literalCountOf(quint16 methodPointer) const
 {
     Data d = getDataOf( methodPointer, false );
     Q_ASSERT( isCompiledMethod(d_objectSpace,d.d_pos) );
@@ -351,7 +367,7 @@ ObjectMemory::ByteString ObjectMemory::methodBytecodes(quint16 methodPointer) co
     return ByteString( bytes, byteLen );
 }
 
-quint8 ObjectMemory::methodArgumentCount(quint16 methodPointer) const
+quint8 ObjectMemory::argumentCountOf(quint16 methodPointer) const
 {
     Data d = getDataOf( methodPointer, false );
     Q_ASSERT( isCompiledMethod(d_objectSpace,d.d_pos) );
@@ -367,7 +383,7 @@ quint8 ObjectMemory::methodArgumentCount(quint16 methodPointer) const
     return ( extension >> 9 ) & 0x1f;
 }
 
-quint8 ObjectMemory::methodPrimitiveIndex(quint16 methodPointer) const
+quint8 ObjectMemory::primitiveIndexOf(quint16 methodPointer) const
 {
     Data d = getDataOf( methodPointer, false );
     Q_ASSERT( isCompiledMethod(d_objectSpace,d.d_pos) );
@@ -381,7 +397,7 @@ quint8 ObjectMemory::methodPrimitiveIndex(quint16 methodPointer) const
     return ( extension >> 1 ) & 0xff;
 }
 
-quint16 ObjectMemory::methodLiteral(quint8 index, quint16 methodPointer) const
+quint16 ObjectMemory::literalOfMethod(quint8 index, quint16 methodPointer) const
 {
     Data d = getDataOf( methodPointer, false );
     Q_ASSERT( isCompiledMethod(d_objectSpace,d.d_pos) );
@@ -396,7 +412,7 @@ bool ObjectMemory::isPointer(quint16 ptr)
     return !isInt(ptr);
 }
 
-qint16 ObjectMemory::toInt(quint16 objectPointer)
+qint16 ObjectMemory::integerValueOf(quint16 objectPointer)
 {
     if( isInt(objectPointer) )
     {

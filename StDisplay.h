@@ -1,5 +1,5 @@
-#ifndef STVIRTUALMACHINE_H
-#define STVIRTUALMACHINE_H
+#ifndef STDISPLAY_H
+#define STDISPLAY_H
 
 /*
 * Copyright 2020 Rochus Keller <mailto:me@rochus-keller.ch>
@@ -20,22 +20,18 @@
 * http://www.gnu.org/copyleft/gpl.html.
 */
 
-#include <QObject>
+#include <QWidget>
 
 namespace St
 {
-    class ObjectMemory2;
-    class Interpreter;
-
-    class VirtualMachine : public QObject
+    class Display : public QWidget
     {
+        Q_OBJECT
     public:
-        explicit VirtualMachine(QObject *parent = 0);
-        void run( const QString& path );
-    private:
-        ObjectMemory2* d_om;
-        Interpreter* d_ip;
+        explicit Display(QWidget *parent = 0);
+        static Display* inst();
+
     };
 }
 
-#endif // STVIRTUALMACHINE_H
+#endif // STDISPLAY_H

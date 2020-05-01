@@ -1,6 +1,3 @@
-#ifndef STVIRTUALMACHINE_H
-#define STVIRTUALMACHINE_H
-
 /*
 * Copyright 2020 Rochus Keller <mailto:me@rochus-keller.ch>
 *
@@ -19,23 +16,24 @@
 * http://www.fsf.org/licensing/licenses/info/GPLv2.html and
 * http://www.gnu.org/copyleft/gpl.html.
 */
+#include "StDisplay.h"
+using namespace St;
 
-#include <QObject>
+static Display* s_inst = 0;
 
-namespace St
+Display::Display(QWidget *parent) : QWidget(parent)
 {
-    class ObjectMemory2;
-    class Interpreter;
-
-    class VirtualMachine : public QObject
-    {
-    public:
-        explicit VirtualMachine(QObject *parent = 0);
-        void run( const QString& path );
-    private:
-        ObjectMemory2* d_om;
-        Interpreter* d_ip;
-    };
+    setAttribute(Qt::WA_DeleteOnClose);
+    setMouseTracking(true);
+    setFocusPolicy(Qt::StrongFocus);
+    setCursor(Qt::BlankCursor);
+    showMaximized();
 }
 
-#endif // STVIRTUALMACHINE_H
+Display*Display::inst()
+{
+    if( s_inst == 0 )
+        s_inst = new Display();
+    return s_inst;
+}
+

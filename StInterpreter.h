@@ -35,7 +35,7 @@ namespace St
                            TempFrameStart = 6 };
         enum BlockContext { CallerIndex = 0, BlockArgumentCountIndex = 3, InitialIPIndex = 4,
                             HomeIndex = 5 };
-        enum Registers { ActiveContext, HomeContext, Method, Receiver, MessageSelector, NewMethod };
+        enum Registers { ActiveContext, HomeContext, Method, Receiver, MessageSelector, NewMethod, NewProcess };
 
         enum ClassIndizes {
             SuperClassIndex = 0,
@@ -46,6 +46,32 @@ namespace St
         enum ProcessScheduler {
             ProcessListIndex = 0,
             ActiveProcessIndex = 1
+        };
+
+        enum StreamIndices {
+            StreamArrayIndex = 0,
+            StreamIndexIndex = 1,
+            StreamReadLimitIndex = 2,
+            StreamWriteLimitIndex = 3
+        };
+
+        enum LinkedList {
+            FirstLinkIndex = 0,
+            LastLinkIndex = 1
+        };
+
+        enum Semaphore {
+            ExcessSignalIndex = 2
+        };
+
+        enum Link {
+            NextLinkIndex = 0
+        };
+
+        enum Process {
+            SuspendedContextIndex = 1,
+            PriorityIndex = 2,
+            MyListIndex = 3
         };
 
         Interpreter(QObject* p = 0);
@@ -129,12 +155,10 @@ namespace St
         OOP primitiveFail();
         qint16 popInteger();
         void pushInteger(qint16);
-        bool isIntegerValue(int);
         OOP positive16BitIntegerFor(int);
         int positive16BitValueOf(OOP);
         void arithmeticSelectorPrimitive();
         void commonSelectorPrimitive();
-        bool isIntegerObject(OOP);
         void primitiveAdd();
         void primitiveSubtract();
         void primitiveLessThan();
@@ -175,11 +199,78 @@ namespace St
         void primitiveBitXor();
         void _compareImp(char op);
         void _bitImp(char op);
+        void primitiveAsFloat();
+        void primitiveFloatAdd();
+        void primitiveFloatSubtract();
+        void primitiveFloatLessThan();
+        void primitiveFloatGreaterThan();
+        void primitiveFloatLessOrEqual();
+        void primitiveFloatGreaterOrEqual();
+        void primitiveFloatEqual();
+        void primitiveFloatNotEqual();
+        void primitiveFloatMultiply();
+        void primitiveFloatDivide();
+        void primitiveTruncated();
+        void primitiveFractionalPart();
+        void primitiveExponent();
+        void primitiveTimesTwoPower();
+        void _floatOpImp(char op);
+        void _floatCompImp(char op);
+        float popFloat();
+        void pushFloat(float);
+        void primitiveAt();
+        void primitiveAtPut();
+        void primitiveSize();
+        void primitiveStringAt();
+        void primitiveStringAtPut();
+        void primitiveNext();
+        void primitiveNextPut();
+        void primitiveAtEnd();
+        void checkIndexableBoundsOf(int index, OOP array );
+        int lengthOf(OOP array);
+        OOP subscriptWith(OOP array, int index);
+        void subscriptWithStoring(OOP array, int index, OOP value );
+        void primitiveObjectAt();
+        void primitiveObjectAtPut();
+        void primitiveNew();
+        void primitiveNewWithArg();
+        void primitiveBecome();
+        void primitiveInstVarAt();
+        void primitiveInstVarAtPut();
+        void primitiveAsOop();
+        void primitiveAsObject();
+        void primitiveSomeInstance();
+        void primitiveNextInstance();
+        void primitiveNewMethod();
+        void checkInstanceVariableBoundsOf( int index, OOP object );
+        void primitiveValueWithArgs();
+        void primitivePerform();
+        void primitivePerformWithArgs();
+        void primitiveSignal();
+        void primitiveWait();
+        void primitiveResume();
+        void primitiveSuspend();
+        void primitiveFlushCache();
+        void asynchronousSignal(OOP aSemaphore);
+        bool isEmptyList(OOP aLinkedList);
+        void synchronousSignal(OOP aSemaphore);
+        OOP removeFirstLinkOfList(OOP);
+        void transferTo(OOP aProcess);
+        OOP activeProcess();
+        OOP schedulerPointer();
+        OOP firstContext();
+        void addLastLinkToList( OOP aLink, OOP aLinkedList );
+        OOP wakeHighestPriority();
+        void sleep(OOP aProcess);
+        void resume(OOP aProcess);
+        void suspendActive();
+        void primitiveQuit();
     private:
-        ObjectMemory2* d_om;
-        qint16 stackPointer, instructionPointer, argumentCount, primitiveIndex;
+        ObjectMemory2* memory;
+        qint16 stackPointer, instructionPointer, argumentCount, primitiveIndex, semaphoreIndex;
+        QList<OOP> semaphoreList;
         quint8 currentBytecode;
-        bool d_run, success;
+        bool d_run, success, newProcessWaiting;
     };
 }
 

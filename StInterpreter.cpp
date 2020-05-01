@@ -17,101 +17,111 @@
 * http://www.gnu.org/copyleft/gpl.html.
 */
 
+#include "StDisplay.h"
 #include "StInterpreter.h"
 #include <QtDebug>
+#include <QApplication>
 using namespace St;
 
-Interpreter::Interpreter(QObject* p):QObject(p),d_om(0),stackPointer(0),instructionPointer(0),d_run(false)
+Interpreter::Interpreter(QObject* p):QObject(p),memory(0),stackPointer(0),instructionPointer(0),d_run(false),
+    semaphoreIndex(0), newProcessWaiting(false)
 {
 
 }
 
 void Interpreter::setOm(ObjectMemory2* om)
 {
-    d_om = om;
+    memory = om;
 }
 
 void Interpreter::interpret()
 {
     d_run = true;
+    newActiveContext( firstContext() ); // BB: When Smalltalk is started up, ...
     while( d_run )
+    {
         cycle();
+        qApp->processEvents();
+    }
 }
 
 qint16 Interpreter::instructionPointerOfContext(Interpreter::OOP contextPointer)
 {
-    return ObjectMemory2::toInt(d_om->fetchWordOfObject(InstructionPointerIndex,contextPointer));
+    return ObjectMemory2::integerValueOf(memory->fetchWordOfObject(InstructionPointerIndex,contextPointer));
 }
 
 void Interpreter::storeInstructionPointerValueInContext(qint16 value, Interpreter::OOP contextPointer)
 {
-    d_om->storeWordOfObject( InstructionPointerIndex, contextPointer, ObjectMemory2::toPtr(value) );
+    memory->storeWordOfObject( InstructionPointerIndex, contextPointer, ObjectMemory2::integerObjectOf(value) );
 }
 
 qint16 Interpreter::stackPointerOfContext(Interpreter::OOP contextPointer)
 {
-    return ObjectMemory2::toInt(d_om->fetchWordOfObject(StackPointerIndex,contextPointer));
+    return ObjectMemory2::integerValueOf(memory->fetchWordOfObject(StackPointerIndex,contextPointer));
 }
 
 void Interpreter::storeStackPointerValueInContext(qint16 value, Interpreter::OOP contextPointer)
 {
-    d_om->storeWordOfObject( StackPointerIndex, contextPointer, ObjectMemory2::toPtr(value) );
+    memory->storeWordOfObject( StackPointerIndex, contextPointer, ObjectMemory2::integerObjectOf(value) );
 }
 
 qint16 Interpreter::argumentCountOfBlock(Interpreter::OOP blockPointer)
 {
-    return ObjectMemory2::toInt(d_om->fetchWordOfObject(BlockArgumentCountIndex,blockPointer));
+    return ObjectMemory2::integerValueOf(memory->fetchWordOfObject(BlockArgumentCountIndex,blockPointer));
 }
 
 bool Interpreter::isBlockContext(Interpreter::OOP contextPointer)
 {
-    const OOP methodOrArguments = d_om->fetchWordOfObject(MethodIndex, contextPointer);
-    return !ObjectMemory2::isPointer(methodOrArguments);
+    const OOP methodOrArguments = memory->fetchWordOfObject(MethodIndex, contextPointer);
+    return ObjectMemory2::isIntegerObject(methodOrArguments);
 }
 
 void Interpreter::fetchContextRegisters()
 {
-    OOP activeContext = d_om->getRegister(ActiveContext);
+    OOP activeContext = memory->getRegister(ActiveContext);
     OOP homeContext = 0;
     if( isBlockContext(activeContext) )
-        homeContext = d_om->fetchPointerOfObject(HomeIndex,activeContext);
+        homeContext = memory->fetchPointerOfObject(HomeIndex,activeContext);
     else
         homeContext = activeContext;
-    d_om->setRegister(HomeContext,homeContext);
-    d_om->setRegister(Receiver, d_om->fetchPointerOfObject(ReceiverIndex,homeContext) );
-    d_om->setRegister(Method, d_om->fetchPointerOfObject(MethodIndex,homeContext) );
+    memory->setRegister(HomeContext,homeContext);
+    memory->setRegister(Receiver, memory->fetchPointerOfObject(ReceiverIndex,homeContext) );
+    memory->setRegister(Method, memory->fetchPointerOfObject(MethodIndex,homeContext) );
     instructionPointer = instructionPointerOfContext(activeContext) - 1;
     stackPointer = stackPointerOfContext(activeContext) + TempFrameStart - 1;
 }
 
 void Interpreter::storeContextRegisters()
 {
-    OOP activeContext = d_om->getRegister(ActiveContext);
-    storeInstructionPointerValueInContext( instructionPointer + 1, activeContext );
-    storeStackPointerValueInContext( stackPointer - TempFrameStart + 1, activeContext );
+    OOP activeContext = memory->getRegister(ActiveContext);
+    if( activeContext )
+    {
+        storeInstructionPointerValueInContext( instructionPointer + 1, activeContext );
+        storeStackPointerValueInContext( stackPointer - TempFrameStart + 1, activeContext );
+    }
 }
 
 void Interpreter::push(Interpreter::OOP value)
 {
     stackPointer++;
-    d_om->storePointerOfObject( stackPointer, d_om->getRegister(ActiveContext), value);
+    memory->storePointerOfObject( stackPointer, memory->getRegister(ActiveContext), value);
 }
 
 Interpreter::OOP Interpreter::popStack()
 {
-    OOP stackTop = d_om->fetchPointerOfObject( stackPointer, d_om->getRegister(ActiveContext) );
+    OOP stackTop = memory->fetchPointerOfObject( stackPointer, memory->getRegister(ActiveContext) );
     stackPointer--;
     return stackTop;
 }
 
 Interpreter::OOP Interpreter::stackTop()
 {
-    return d_om->fetchPointerOfObject( stackPointer, d_om->getRegister(ActiveContext) );
+    return memory->fetchPointerOfObject( stackPointer, memory->getRegister(ActiveContext) );
 }
 
 Interpreter::OOP Interpreter::stackValue(qint16 offset)
 {
-    return d_om->fetchPointerOfObject( stackPointer - offset, d_om->getRegister(ActiveContext) );
+    return memory->fetchPointerOfObject( stackPointer - offset, memory->getRegister(ActiveContext) );
 }
 
 void Interpreter::pop(quint16 number)
@@ -126,41 +136,42 @@ void Interpreter::unPop(quint16 number)
 
 void Interpreter::newActiveContext(Interpreter::OOP aContext)
 {
+    Q_ASSERT( aContext );
     storeContextRegisters();
-    d_om->setRegister(ActiveContext, aContext);
+    memory->setRegister(ActiveContext, aContext);
     fetchContextRegisters();
 }
 
 Interpreter::OOP Interpreter::sender()
 {
-    return d_om->fetchPointerOfObject(SenderIndex, d_om->getRegister(HomeContext) );
+    return memory->fetchPointerOfObject(SenderIndex, memory->getRegister(HomeContext) );
 }
 
 Interpreter::OOP Interpreter::caller()
 {
-    return d_om->fetchPointerOfObject(CallerIndex, d_om->getRegister(HomeContext) );
+    return memory->fetchPointerOfObject(CallerIndex, memory->getRegister(HomeContext) );
 }
 
 Interpreter::OOP Interpreter::temporary(qint16 offset)
 {
-    return d_om->fetchPointerOfObject( offset + TempFrameStart, d_om->getRegister(HomeContext) );
+    return memory->fetchPointerOfObject( offset + TempFrameStart, memory->getRegister(HomeContext) );
 }
 
 Interpreter::OOP Interpreter::literal(qint16 offset)
 {
-    return d_om->methodLiteral( offset, d_om->getRegister(Method) );
+    return memory->literalOfMethod( offset, memory->getRegister(Method) );
 }
 
 Interpreter::OOP Interpreter::lookupMethodInDictionary(Interpreter::OOP dictionary, OOP selector)
 {
     // Just a trivial linear scan; not the more fancy hash lookup described in the Blue Book
-    OOP arr = d_om->fetchPointerOfObject(1,dictionary);
+    OOP arr = memory->fetchPointerOfObject(1,dictionary);
     const int SelectorStart = 2;
-    for( int i = SelectorStart; i < d_om->fetchWordLenghtOf(dictionary); i++ )
+    for( int i = SelectorStart; i < memory->fetchWordLenghtOf(dictionary); i++ )
     {
-        OOP sym = d_om->fetchPointerOfObject(i,dictionary);
+        OOP sym = memory->fetchPointerOfObject(i,dictionary);
         if( sym == selector )
-            return d_om->fetchPointerOfObject(i-SelectorStart,arr);
+            return memory->fetchPointerOfObject(i-SelectorStart,arr);
     }
     return 0;
 }
@@ -169,7 +180,7 @@ Interpreter::OOP Interpreter::lookupMethodInClass(Interpreter::OOP cls, Interpre
 {
     while( cls == ObjectMemory2::objectNil )
     {
-        OOP res = lookupMethodInDictionary( d_om->fetchPointerOfObject(MessageDictIndex,cls), selector );
+        OOP res = lookupMethodInDictionary( memory->fetchPointerOfObject(MessageDictIndex,cls), selector );
         if( res )
             return res;
         cls = lookupMethodInClass( superclassOf(cls), selector );
@@ -185,12 +196,12 @@ Interpreter::OOP Interpreter::lookupMethodInClass(Interpreter::OOP cls, Interpre
 
 Interpreter::OOP Interpreter::superclassOf(Interpreter::OOP cls)
 {
-    return d_om->fetchPointerOfObject(SuperClassIndex,cls);
+    return memory->fetchPointerOfObject(SuperClassIndex,cls);
 }
 
 Interpreter::OOP Interpreter::instanceSpecificationOf(Interpreter::OOP cls)
 {
-    return d_om->fetchPointerOfObject(InstanceSpecIndex,cls);
+    return memory->fetchPointerOfObject(InstanceSpecIndex,cls);
 }
 
 bool Interpreter::isPointers(Interpreter::OOP cls)
@@ -215,7 +226,7 @@ qint16 Interpreter::fixedFieldsOf(Interpreter::OOP cls)
 
 quint8 Interpreter::fetchByte()
 {
-    return d_om->fetchByteOfObject(instructionPointer++, d_om->getRegister(Method) );
+    return memory->fetchByteOfObject(instructionPointer++, memory->getRegister(Method) );
 }
 
 void Interpreter::cycle()
@@ -227,7 +238,19 @@ void Interpreter::cycle()
 
 void Interpreter::checkProcessSwitch()
 {
-    // TODO
+    while( semaphoreIndex > 0 )
+    {
+        synchronousSignal( semaphoreList[semaphoreIndex] );
+        semaphoreIndex--;
+    }
+    if( newProcessWaiting )
+    {
+        semaphoreIndex = false;
+        OOP activeProcess_ = memory->getRegister(activeProcess());
+        memory->storePointerOfObject(SuspendedContextIndex, activeProcess_, memory->getRegister(ActiveContext));
+        memory->storePointerOfObject(ActiveProcessIndex, schedulerPointer(), memory->getRegister(NewProcess) );
+        newActiveContext( memory->fetchPointerOfObject( SuspendedContextIndex, memory->getRegister(NewProcess) ));
+    }
 }
 
 void Interpreter::dispatchOnThisBytecode()
@@ -285,7 +308,7 @@ bool Interpreter::returnBytecode()
     {
     // "Return (receiver, true, false, nil) [%1] From Message").arg( b & 0x3 ), 1 );
     case 120:
-        returnValue( d_om->getRegister(Receiver), sender() );
+        returnValue( memory->getRegister(Receiver), sender() );
         break;
     case 121:
         returnValue( ObjectMemory2::objectTrue, sender() );
@@ -341,7 +364,7 @@ bool Interpreter::jumpBytecode()
 
 bool Interpreter::pushReceiverVariableBytecode()
 {
-    push( d_om->fetchPointerOfObject( currentBytecode & 0xf, d_om->getRegister(Receiver) ) );
+    push( memory->fetchPointerOfObject( currentBytecode & 0xf, memory->getRegister(Receiver) ) );
     // "Push Receiver Variable #%1").arg( b & 0xf ), 1 );
     return true;
 }
@@ -366,27 +389,27 @@ bool Interpreter::pushLiteralVariableBytecode()
 {
     // "Push Literal Variable #%1").arg( b & 0x1f ), 1 );
     quint16 assoc = literal( currentBytecode & 0x1f );
-    push( d_om->fetchPointerOfObject( ValueIndex, assoc ) );
+    push( memory->fetchPointerOfObject( ValueIndex, assoc ) );
     return true;
 }
 
 bool Interpreter::storeAndPopReceiverVariableBytecode()
 {
     // "Pop and Store Receiver Variable #%1").arg( b & 0x7 ), 1 );
-    d_om->storePointerOfObject( currentBytecode  & 0x7, d_om->getRegister(Receiver), popStack() );
+    memory->storePointerOfObject( currentBytecode  & 0x7, memory->getRegister(Receiver), popStack() );
     return true;
 }
 
 bool Interpreter::storeAndPopTemoraryVariableBytecode()
 {
     // "Pop and Store Temporary Location #%1").arg( b & 0x7 ), 1 );
-    d_om->storePointerOfObject( ( currentBytecode & 0x7 ) + TempFrameStart, d_om->getRegister(HomeContext), popStack() );
+    memory->storePointerOfObject( ( currentBytecode & 0x7 ) + TempFrameStart, memory->getRegister(HomeContext), popStack() );
     return true;
 }
 
 bool Interpreter::pushReceiverBytecode()
 {
-    push( d_om->getRegister(Receiver) );
+    push( memory->getRegister(Receiver) );
     return true;
 }
 
@@ -433,7 +456,7 @@ bool Interpreter::extendedPushBytecode()
     switch( variableType )
     {
     case 0:
-        push( d_om->fetchPointerOfObject( variableIndex, d_om->getRegister(Receiver) ) );
+        push( memory->fetchPointerOfObject( variableIndex, memory->getRegister(Receiver) ) );
         break;
     case 1:
         push( temporary( variableIndex ) );
@@ -442,7 +465,7 @@ bool Interpreter::extendedPushBytecode()
         push( literal( variableIndex ) );
         break;
     case 3:
-        push( d_om->fetchPointerOfObject( ValueIndex, literal( variableIndex ) ) );
+        push( memory->fetchPointerOfObject( ValueIndex, literal( variableIndex ) ) );
         break;
     default:
         Q_ASSERT( false );
@@ -460,16 +483,16 @@ bool Interpreter::extendedStoreBytecode()
     switch( variableType )
     {
     case 0:
-        d_om->storePointerOfObject(variableIndex,d_om->getRegister(Receiver),stackTop());
+        memory->storePointerOfObject(variableIndex,memory->getRegister(Receiver),stackTop());
         break;
     case 1:
-        d_om->storePointerOfObject(variableIndex+TempFrameStart,d_om->getRegister(HomeContext),stackTop());
+        memory->storePointerOfObject(variableIndex+TempFrameStart,memory->getRegister(HomeContext),stackTop());
         break;
     case 2:
         qCritical() << "illegal store";
         break;
     case 3:
-        d_om->storePointerOfObject(ValueIndex, literal(variableIndex), stackTop() );
+        memory->storePointerOfObject(ValueIndex, literal(variableIndex), stackTop() );
         break;
     default:
         Q_ASSERT( false );
@@ -502,7 +525,7 @@ bool Interpreter::duplicateTopBytecode()
 bool Interpreter::pushActiveContextBytecode()
 {
     // "Push Active Context" ), 1 );
-    push( d_om->getRegister( ActiveContext ) );
+    push( memory->getRegister( ActiveContext ) );
     return true;
 }
 
@@ -586,8 +609,8 @@ bool Interpreter::singleExtendedSuperBytecode()
     const quint8 descriptor = fetchByte();
     argumentCount = ( descriptor >> 5 ) & 0x7;
     const quint16 selectorIndex = descriptor & 0x1f;
-    d_om->setRegister( MessageSelector, literal( selectorIndex ));
-    OOP methodClass = d_om->methodClassOf( d_om->getRegister(Method) );
+    memory->setRegister( MessageSelector, literal( selectorIndex ));
+    OOP methodClass = memory->methodClassOf( memory->getRegister(Method) );
     sendSelectorToClass( superclassOf(methodClass) );
     return true;
 }
@@ -596,8 +619,8 @@ bool Interpreter::doubleExtendedSuperBytecode()
 {
     // "Send Literal Selector #%2 To Superclass With %1 Arguments").arg( bc[pc+1] ).arg( bc[pc+2]), 3 );
     argumentCount = fetchByte();
-    d_om->setRegister( MessageSelector, literal( fetchByte() ));
-    OOP methodClass = d_om->methodClassOf( d_om->getRegister(Method) );
+    memory->setRegister( MessageSelector, literal( fetchByte() ));
+    OOP methodClass = memory->methodClassOf( memory->getRegister(Method) );
     sendSelectorToClass( superclassOf(methodClass) );
     return true;
 }
@@ -610,8 +633,8 @@ bool Interpreter::sendSpecialSelectorBytecode()
     if( specialSelectorPrimitiveResponse() )
         return true;
     const quint16 selectorIndex = ( currentBytecode - 176 ) * 2;
-    OOP selector = d_om->fetchPointerOfObject(selectorIndex, ObjectMemory2::specialSelectors );
-    const quint16 count = ObjectMemory2::toInt( d_om->fetchWordOfObject(
+    OOP selector = memory->fetchPointerOfObject(selectorIndex, ObjectMemory2::specialSelectors );
+    const quint16 count = ObjectMemory2::integerValueOf( memory->fetchWordOfObject(
                                                     selectorIndex + 1, ObjectMemory2::specialSelectors ) );
     sendSelector( selector, count );
     return true;
@@ -645,16 +668,16 @@ void Interpreter::jumpif(quint16 condition, quint32 offset)
 
 void Interpreter::sendSelector(Interpreter::OOP selector, quint16 count)
 {
-    d_om->setRegister(MessageSelector, selector );
+    memory->setRegister(MessageSelector, selector );
     argumentCount = count;
     OOP newReceiver = stackValue(argumentCount);
-    sendSelectorToClass( d_om->fetchClassOf(newReceiver) );
+    sendSelectorToClass( memory->fetchClassOf(newReceiver) );
 }
 
 void Interpreter::sendSelectorToClass(Interpreter::OOP classPointer)
 {
     // original: findNewMethodInClass
-    lookupMethodInClass(classPointer,d_om->getRegister(MessageSelector));
+    lookupMethodInClass(classPointer,memory->getRegister(MessageSelector));
     executeNewMethod();
 }
 
@@ -668,7 +691,7 @@ bool Interpreter::primitiveResponse()
 {
     if( primitiveIndex == 0 )
     {
-        quint8 flagValue = d_om->methodFlags( d_om->getRegister(NewMethod) );
+        quint8 flagValue = memory->flagValueOf( memory->getRegister(NewMethod) );
         switch( flagValue )
         {
         case 5:
@@ -690,17 +713,17 @@ bool Interpreter::primitiveResponse()
 void Interpreter::activateNewMethod()
 {
     quint16 contextSize = TempFrameStart;
-    OOP newMethod = d_om->getRegister(NewMethod);
-    if( d_om->methodLargeContext( newMethod ) )
+    OOP newMethod = memory->getRegister(NewMethod);
+    if( memory->largeContextFlagOf( newMethod ) )
         contextSize += 32;
     else
         contextSize += 12;
-    OOP newContext = d_om->instantiateClassWithPointers(ObjectMemory2::classMethodContext,contextSize);
-    d_om->storePointerOfObject(SenderIndex, newContext, d_om->getRegister(ActiveContext) );
-    storeInstructionPointerValueInContext( d_om->methodInitialInstructionPointer( newMethod ), newContext );
-    storeStackPointerValueInContext( d_om->methodTemporaryCount( newMethod ), newContext );
-    d_om->storePointerOfObject(MethodIndex,newContext,newMethod);
-    transfer( argumentCount + 1, stackPointer - argumentCount, d_om->getRegister(ActiveContext),
+    OOP newContext = memory->instantiateClassWithPointers(ObjectMemory2::classMethodContext,contextSize);
+    memory->storePointerOfObject(SenderIndex, newContext, memory->getRegister(ActiveContext) );
+    storeInstructionPointerValueInContext( memory->initialInstructionPointerOfMethod( newMethod ), newContext );
+    storeStackPointerValueInContext( memory->temporaryCountOf( newMethod ), newContext );
+    memory->storePointerOfObject(MethodIndex,newContext,newMethod);
+    transfer( argumentCount + 1, stackPointer - argumentCount, memory->getRegister(ActiveContext),
               ReceiverIndex, newContext );
     pop( argumentCount + 1 );
     newActiveContext(newContext);
@@ -713,9 +736,9 @@ void Interpreter::transfer(quint32 count, quint16 firstFrom, Interpreter::OOP fr
     quint16 toIndex = firstTo;
     while( fromIndex < lastFrom )
     {
-        OOP oop = d_om->fetchPointerOfObject(fromIndex, fromOop);
-        d_om->storePointerOfObject(toIndex,toOop,oop);
-        d_om->storePointerOfObject(fromIndex,fromOop,ObjectMemory2::objectNil );
+        OOP oop = memory->fetchPointerOfObject(fromIndex, fromOop);
+        memory->storePointerOfObject(toIndex,toOop,oop);
+        memory->storePointerOfObject(fromIndex,fromOop,ObjectMemory2::objectNil );
         fromIndex += 1;
         toIndex += 1;
     }
@@ -732,16 +755,16 @@ bool Interpreter::specialSelectorPrimitiveResponse()
 
 void Interpreter::nilContextFields()
 {
-    d_om->storePointerOfObject( SenderIndex, d_om->getRegister( ActiveContext ), ObjectMemory2::objectNil );
-    d_om->storePointerOfObject( InstructionPointerIndex, d_om->getRegister( ActiveContext ), ObjectMemory2::objectNil );
+    memory->storePointerOfObject( SenderIndex, memory->getRegister( ActiveContext ), ObjectMemory2::objectNil );
+    memory->storePointerOfObject( InstructionPointerIndex, memory->getRegister( ActiveContext ), ObjectMemory2::objectNil );
 }
 
 void Interpreter::returnToActiveContext(Interpreter::OOP aContext)
 {
-    d_om->addTemp(aContext);
+    memory->addTemp(aContext);
     nilContextFields();
-    d_om->removeTemp(aContext);
-    d_om->setRegister(ActiveContext,aContext);
+    memory->removeTemp(aContext);
+    memory->setRegister(ActiveContext,aContext);
     fetchContextRegisters();
 }
 
@@ -749,21 +772,21 @@ void Interpreter::returnValue(Interpreter::OOP resultPointer, Interpreter::OOP c
 {
     if( contextPointer == ObjectMemory2::objectNil )
     {
-        push( d_om->getRegister(ActiveContext) );
+        push( memory->getRegister(ActiveContext) );
         push( resultPointer );
         sendSelector(ObjectMemory2::symbolCannotReturn, 1 );
     }
-    OOP sendersIP = d_om->fetchPointerOfObject( InstructionPointerIndex, contextPointer );
+    OOP sendersIP = memory->fetchPointerOfObject( InstructionPointerIndex, contextPointer );
     if( sendersIP == ObjectMemory2::objectNil )
     {
-        push( d_om->getRegister(ActiveContext) );
+        push( memory->getRegister(ActiveContext) );
         push( resultPointer );
         sendSelector(ObjectMemory2::symbolCannotReturn, 1 );
     }
-    d_om->addTemp(resultPointer);
+    memory->addTemp(resultPointer);
     returnToActiveContext(contextPointer);
     push( resultPointer );
-    d_om->removeTemp(resultPointer);
+    memory->removeTemp(resultPointer);
 }
 
 void Interpreter::initPrimitive()
@@ -784,48 +807,47 @@ Interpreter::OOP Interpreter::primitiveFail()
 
 qint16 Interpreter::popInteger()
 {
-    OOP res = popStack();
-    return ObjectMemory2::toInt(res);
+    OOP integerPointer = popStack();
+    successUpdate( memory->isIntegerObject(integerPointer) );
+    if( success )
+        memory->integerValueOf(integerPointer);
+    else
+        return 0;
 }
 
 void Interpreter::pushInteger(qint16 i)
 {
-    push( ObjectMemory2::toPtr(i));
+    push( memory->integerObjectOf(i));
 }
 
-bool Interpreter::isIntegerValue(int i)
+Interpreter::OOP Interpreter::positive16BitIntegerFor(int integerValue)
 {
-    return i < 16834 && i > - 16834; // TODO error in BB?
-}
-
-Interpreter::OOP Interpreter::positive16BitIntegerFor(int i)
-{
-    if( i < 0 )
+    if( integerValue < 0 )
         return primitiveFail();
-    if( isIntegerValue(i) )
-        return ObjectMemory2::toPtr(i);
-    OOP newLargeInteger = d_om->instantiateClassWithBytes(ObjectMemory2::classLargePositiveInteger, 2);
-    d_om->storeByteOfObject( 0, newLargeInteger, i & 0xff );
-    d_om->storeByteOfObject( 1, newLargeInteger, ( i >> 8 ) & 0xff );
+    if( memory->isIntegerValue(integerValue) )
+        return memory->integerObjectOf(integerValue);
+    OOP newLargeInteger = memory->instantiateClassWithBytes(ObjectMemory2::classLargePositiveInteger, 2);
+    memory->storeByteOfObject( 0, newLargeInteger, integerValue & 0xff );
+    memory->storeByteOfObject( 1, newLargeInteger, ( integerValue >> 8 ) & 0xff );
     return newLargeInteger;
 }
 
-int Interpreter::positive16BitValueOf(Interpreter::OOP oop)
+int Interpreter::positive16BitValueOf(Interpreter::OOP integerPointer)
 {
-    if( !ObjectMemory2::isPointer(oop) )
-        return ObjectMemory2::toInt(oop);
-    if( d_om->fetchClassOf(oop) != ObjectMemory2::classLargePositiveInteger )
+    if( memory->isIntegerObject(integerPointer) )
+        return memory->integerValueOf(integerPointer);
+    if( memory->fetchClassOf(integerPointer) != ObjectMemory2::classLargePositiveInteger )
         return primitiveFail();
-    if( d_om->fetchByteLenghtOf(oop) != 2 )
+    if( memory->fetchByteLenghtOf(integerPointer) != 2 )
         return primitiveFail();
-    int value = d_om->fetchByteOfObject(oop,1) << 8;
-    value += d_om->fetchByteOfObject(oop,0);
+    int value = memory->fetchByteOfObject(integerPointer,1) << 8;
+    value += memory->fetchByteOfObject(integerPointer,0);
     return value;
 }
 
 void Interpreter::arithmeticSelectorPrimitive()
 {
-    successUpdate( isIntegerObject( stackValue(1) ) );
+    successUpdate( memory->isIntegerObject( stackValue(1) ) );
     if( !success )
         return;
     switch( currentBytecode )
@@ -884,7 +906,7 @@ void Interpreter::arithmeticSelectorPrimitive()
 void Interpreter::commonSelectorPrimitive()
 {
     argumentCount = fetchIntegerOfObject( (currentBytecode - 176) * 2 + 1, ObjectMemory2::specialSelectors );
-    OOP receiverClass = d_om->fetchClassOf( stackValue( argumentCount ) );
+    OOP receiverClass = memory->fetchClassOf( stackValue( argumentCount ) );
     switch( currentBytecode )
     {
     case 198:
@@ -907,11 +929,6 @@ void Interpreter::commonSelectorPrimitive()
         break;
     }
     primitiveFail();
-}
-
-bool Interpreter::isIntegerObject(Interpreter::OOP oop)
-{
-    return !ObjectMemory2::isPointer(oop);
 }
 
 void Interpreter::primitiveAdd()
@@ -969,10 +986,10 @@ void Interpreter::primitiveDivide()
     if( success )
     {
         integerResult = integerReceiver / integerArgument;
-        successUpdate( isIntegerValue(integerResult) );
+        successUpdate( memory->isIntegerValue(integerResult) );
     }
     if( success )
-        push( ObjectMemory2::toPtr( integerResult ) );
+        push( memory->integerObjectOf( integerResult ) );
     else
         unPop(2);
 }
@@ -986,7 +1003,7 @@ void Interpreter::primitiveMod()
     if( success )
     {
         integerResult = integerReceiver % integerArgument; // TODO quotient always rounded down towards negative infinity?
-        successUpdate( isIntegerValue(integerResult) );
+        successUpdate( memory->isIntegerValue(integerResult) );
     }
     if( success )
         pushInteger( integerResult );
@@ -1000,14 +1017,14 @@ void Interpreter::primitiveMakePoint()
 
     OOP integerArgument = popStack();
     OOP integerReceiver = popStack();
-    successUpdate( isIntegerValue(integerArgument) );
-    successUpdate( isIntegerValue(integerReceiver) );
+    successUpdate( memory->isIntegerValue(integerArgument) );
+    successUpdate( memory->isIntegerValue(integerReceiver) );
 
     if( success )
     {
-        OOP pointResult = d_om->instantiateClassWithPointers( ObjectMemory2::classPoint, ClassPointSize );
-        d_om->storePointerOfObject( XIndex, pointResult, integerReceiver );
-        d_om->storePointerOfObject( YIndex, pointResult, integerArgument );
+        OOP pointResult = memory->instantiateClassWithPointers( ObjectMemory2::classPoint, ClassPointSize );
+        memory->storePointerOfObject( XIndex, pointResult, integerReceiver );
+        memory->storePointerOfObject( YIndex, pointResult, integerArgument );
         push( pointResult );
     }
     else
@@ -1026,7 +1043,7 @@ void Interpreter::primitiveBitShift()
             integerResult = integerReceiver << integerArgument;
         else
             integerResult = integerReceiver >> -integerArgument;
-        successUpdate( isIntegerValue(integerResult) );
+        successUpdate( memory->isIntegerValue(integerResult) );
     }
     if( success )
         pushInteger( integerResult );
@@ -1043,7 +1060,7 @@ void Interpreter::primitiveDiv()
     if( success )
     {
         integerResult = integerReceiver / integerArgument; // TODO quotient always rounded down towards negative infinity?
-        successUpdate( isIntegerValue(integerResult) );
+        successUpdate( memory->isIntegerValue(integerResult) );
     }
     if( success )
         pushInteger( integerResult );
@@ -1063,28 +1080,82 @@ void Interpreter::primitiveBitOr()
 
 qint16 Interpreter::fetchIntegerOfObject(quint16 fieldIndex, Interpreter::OOP objectPointer)
 {
-    OOP integerPointer = d_om->fetchPointerOfObject(fieldIndex,objectPointer);
-    if( isIntegerObject(integerPointer) )
-        return ObjectMemory2::toInt(integerPointer);
+    OOP integerPointer = memory->fetchPointerOfObject(fieldIndex,objectPointer);
+    if( memory->isIntegerObject(integerPointer) )
+        return memory->integerValueOf(integerPointer);
     else
         return primitiveFail();
 }
 
 void Interpreter::storeIntegerOfObjectWithValue(quint16 fieldIndex, Interpreter::OOP objectPointer, int integerValue)
 {
-    if( isIntegerValue( integerValue ) )
+    if( memory->isIntegerValue( integerValue ) )
     {
-        OOP integerPointer = ObjectMemory2::toPtr(integerValue);
-        d_om->storePointerOfObject(fieldIndex,objectPointer,integerPointer);
+        OOP integerPointer = memory->integerObjectOf(integerValue);
+        memory->storePointerOfObject(fieldIndex,objectPointer,integerPointer);
     }else
         primitiveFail();
+}
+
+void Interpreter::primitiveEquivalent()
+{
+    OOP otherObject = popStack();
+    OOP thisObject = popStack();
+    if( thisObject == otherObject )
+        push( ObjectMemory2::objectTrue );
+    else
+        push( ObjectMemory2::objectFalse );
+}
+
+void Interpreter::primitiveClass()
+{
+    OOP instance = popStack();
+    push( memory->fetchClassOf(instance) );
+}
+
+void Interpreter::primitiveBlockCopy()
+{
+    OOP blockArgumentCount = popStack();
+    OOP context = popStack();
+    OOP methodContext = 0;
+    if( isBlockContext(context) )
+        methodContext = memory->fetchPointerOfObject(HomeIndex,context);
+    else
+        methodContext = context;
+    int contextSize = memory->fetchWordLenghtOf(methodContext);
+    OOP newContext = memory->instantiateClassWithPointers( ObjectMemory2::classBlockContext, contextSize );
+    OOP initialIP = memory->integerObjectOf(instructionPointer+3);
+    memory->storePointerOfObject(InitialIPIndex, newContext, initialIP);
+    memory->storePointerOfObject(InstructionPointerIndex, newContext, initialIP);
+    storeStackPointerValueInContext(0,newContext);
+    memory->storePointerOfObject(BlockArgumentCountIndex, newContext, blockArgumentCount );
+    memory->storePointerOfObject(HomeIndex, newContext, methodContext );
+    push(newContext);
+}
+
+void Interpreter::primitiveValue()
+{
+    OOP blockContext = stackValue(argumentCount);
+    OOP blockArgumentCount = argumentCountOfBlock(blockContext);
+    successUpdate( argumentCount == blockArgumentCount );
+    if( success )
+    {
+        transfer(argumentCount, stackPointer-argumentCount+1,
+                 memory->getRegister(ActiveContext), TempFrameStart, blockContext );
+        pop(argumentCount+1);
+        OOP initialIP = memory->fetchPointerOfObject(InitialIPIndex, blockContext);
+        memory->storePointerOfObject(InstructionPointerIndex, blockContext, initialIP);
+        storeStackPointerValueInContext(argumentCount, blockContext);
+        memory->storePointerOfObject(CallerIndex, blockContext, memory->getRegister(ActiveContext) );
+        newActiveContext(blockContext);
+    }
 }
 
 void Interpreter::quickInstanceLoad()
 {
     OOP thisReceiver = popStack();
-    quint16 fieldIndex = d_om->methodFieldIndex( d_om->getRegister(NewMethod) );
-    push( d_om->fetchPointerOfObject( fieldIndex, thisReceiver ) );
+    quint16 fieldIndex = memory->fieldIndexOf( memory->getRegister(NewMethod) );
+    push( memory->fetchPointerOfObject( fieldIndex, thisReceiver ) );
 }
 
 void Interpreter::dispatchPrimitives()
@@ -1103,7 +1174,8 @@ void Interpreter::dispatchPrimitives()
         dispatchSystemPrimitives();
     else if( primitiveIndex < 256 )
         dispatchPrivatePrimitives();
-    primitiveFail();
+    else
+        primitiveFail();
 }
 
 void Interpreter::dispatchArithmeticPrimitives()
@@ -1112,9 +1184,228 @@ void Interpreter::dispatchArithmeticPrimitives()
         dispatchIntegerPrimitives();
     else if( primitiveIndex < 40 )
         dispatchLargeIntegerPrimitives();
-    if( primitiveIndex < 60 )
+    else if( primitiveIndex < 60 )
         dispatchFloatPrimitives();
-    primitiveFail();
+    else
+        primitiveFail();
+}
+
+void Interpreter::dispatchSubscriptAndStreamPrimitives()
+{
+    switch( primitiveIndex )
+    {
+    case 60:
+        primitiveAt();
+        break;
+    case 61:
+        primitiveAtPut();
+        break;
+    case 62:
+        primitiveSize();
+        break;
+    case 63:
+        primitiveStringAt();
+        break;
+    case 64:
+        primitiveStringAtPut();
+        break;
+    case 65:
+        primitiveNext();
+        break;
+    case 66:
+        primitiveNextPut();
+        break;
+    case 67:
+        primitiveAtEnd();
+        break;
+    default:
+        primitiveFail();
+        break;
+    }
+}
+
+void Interpreter::dispatchStorageManagementPrimitives()
+{
+    switch( primitiveIndex )
+    {
+    case 68:
+        primitiveObjectAt();
+        break;
+    case 69:
+        primitiveObjectAtPut();
+        break;
+    case 70:
+        primitiveNew();
+        break;
+    case 71:
+        primitiveNewWithArg();
+        break;
+    case 72:
+        primitiveBecome();
+        break;
+    case 73:
+        primitiveInstVarAt();
+        break;
+    case 74:
+        primitiveInstVarAtPut();
+        break;
+    case 75:
+        primitiveAsOop();
+        break;
+    case 76:
+        primitiveAsObject();
+        break;
+    case 77:
+        primitiveSomeInstance();
+        break;
+    case 78:
+        primitiveNextInstance();
+        break;
+    case 79:
+        primitiveNewMethod();
+        break;
+    default:
+        primitiveFail();
+        break;
+    }
+}
+
+void Interpreter::dispatchControlPrimitives()
+{
+    switch( primitiveIndex )
+    {
+    case 80:
+        primitiveBlockCopy();
+        break;
+    case 81:
+        primitiveValue();
+        break;
+    case 82:
+        primitiveValueWithArgs();
+        break;
+    case 83:
+        primitivePerform();
+        break;
+    case 84:
+        primitivePerformWithArgs();
+        break;
+    case 85:
+        primitiveSignal();
+        break;
+    case 86:
+        primitiveWait();
+        break;
+    case 87:
+        primitiveResume();
+        break;
+    case 88:
+        primitiveSuspend();
+        break;
+    case 89:
+        primitiveFlushCache();
+        break;
+    default:
+        primitiveFail();
+        break;
+    }
+}
+
+void Interpreter::dispatchInputOutputPrimitives()
+{
+    // TODO
+    switch( primitiveIndex )
+    {
+    case 90:
+        //primitiveMousePoint();
+        break;
+    case 91:
+        //primitiveCursorLocPut();
+        break;
+    case 92:
+        //primitiveCursorLink();
+        break;
+    case 93:
+        //primitiveInputSemaphore();
+        break;
+    case 94:
+        //primitiveSamleInterval();
+        break;
+    case 95:
+        //primitiveInputWord();
+        break;
+    case 96:
+        //primitiveCopyBits();
+        break;
+    case 97:
+        //primitiveSnapshot();
+        break;
+    case 98:
+        //primitiveTimeWordsInto();
+        break;
+    case 99:
+        //primitiveTickWordsInto();
+        break;
+    case 100:
+        //primitiveSignalAtClick();
+        break;
+    case 101:
+        //primitiveBeCursor();
+        break;
+    case 102:
+        //primitiveBeDisplay();
+        break;
+    case 103:
+        //primitiveScanCharacters();
+        break;
+    case 104:
+        //primitiveDrawLoop();
+        break;
+    case 105:
+        //primitiveStringReplace();
+        break;
+    default:
+        primitiveFail();
+        break;
+    }
+}
+
+void Interpreter::dispatchSystemPrimitives()
+{
+    // TODO
+    switch( primitiveIndex )
+    {
+    case 110:
+        primitiveEquivalent();
+        break;
+    case 111:
+        primitiveClass();
+        break;
+    case 112:
+        //primitiveCoreLeft(); // number of unallocated Words in object space
+        pushInteger(0x2fff); // phantasy number
+        break;
+    case 113:
+        primitiveQuit();
+        break;
+    case 114:
+        //primitiveExitToDebugger();
+        break;
+    case 115:
+        //primitiveOopsLeft();
+        pushInteger( memory->getOopsLeft() );
+        break;
+    case 116:
+        //primitiveSignalAtOopsLeftWordsLeft();
+        break;
+    default:
+        primitiveFail();
+        break;
+    }
+}
+
+void Interpreter::dispatchPrivatePrimitives()
+{
+    // TODO
 }
 
 void Interpreter::dispatchIntegerPrimitives()
@@ -1175,8 +1466,10 @@ void Interpreter::dispatchIntegerPrimitives()
     case 18:
         primitiveMakePoint();
         break;
+    default:
+        primitiveFail();
+        break;
     }
-    primitiveFail();
 }
 
 void Interpreter::dispatchLargeIntegerPrimitives()
@@ -1186,8 +1479,57 @@ void Interpreter::dispatchLargeIntegerPrimitives()
 
 void Interpreter::dispatchFloatPrimitives()
 {
-    // Examples of Float instance bytes
-    // 0x40490fda, 0x3f80, empty, 0x3f, 0x40, 0x460ff0
+    switch( primitiveIndex )
+    {
+    case 40:
+        primitiveAsFloat();
+        break;
+    case 41:
+        primitiveFloatAdd();
+        break;
+    case 42:
+        primitiveFloatSubtract();
+        break;
+    case 43:
+        primitiveFloatLessThan();
+        break;
+    case 44:
+        primitiveFloatGreaterThan();
+        break;
+    case 45:
+        primitiveFloatLessOrEqual();
+        break;
+    case 46:
+        primitiveFloatGreaterOrEqual();
+        break;
+    case 47:
+        primitiveFloatEqual();
+        break;
+    case 48:
+        primitiveFloatNotEqual();
+        break;
+    case 49:
+        primitiveFloatMultiply();
+        break;
+    case 50:
+        primitiveFloatDivide();
+        break;
+    case 51:
+        primitiveTruncated();
+        break;
+    case 52:
+        primitiveFractionalPart();
+        break;
+    case 53:
+        primitiveExponent();
+        break;
+    case 54:
+        primitiveTimesTwoPower();
+        break;
+    default:
+        primitiveFail();
+        break;
+    }
 }
 
 void Interpreter::_addSubMulImp(char op)
@@ -1211,12 +1553,713 @@ void Interpreter::_addSubMulImp(char op)
         default:
             Q_ASSERT( false );
         }
-        successUpdate( isIntegerValue(integerResult) );
+        successUpdate( memory->isIntegerValue(integerResult) );
     }
     if( success )
         pushInteger( integerResult );
     else
         unPop(2);
+}
+
+void Interpreter::_floatOpImp(char op)
+{
+    const float floatArgument = popFloat();
+    const float floatReceiver = popFloat();
+    float floatResult = 0.0;
+    if( success )
+    {
+        switch(op)
+        {
+        case '+':
+            floatResult = floatReceiver + floatArgument;
+            break;
+        case '-':
+            floatResult = floatReceiver - floatArgument;
+            break;
+        case '*':
+            floatResult = floatReceiver * floatArgument;
+            break;
+        case '/':
+            floatResult = floatReceiver / floatArgument;
+            break;
+        default:
+            Q_ASSERT( false );
+        }
+    }
+    if( success )
+        pushFloat( floatResult );
+    else
+        unPop(2);
+}
+
+void Interpreter::_floatCompImp(char op)
+{
+    const float floatArgument = popFloat();
+    const float floatReceiver = popFloat();
+    if( success )
+    {
+        switch( op )
+        {
+        case '=':
+            push( floatReceiver == floatArgument ? ObjectMemory2::objectTrue : ObjectMemory2::objectFalse );
+            break;
+        case '!':
+            push( floatReceiver != floatArgument ? ObjectMemory2::objectTrue : ObjectMemory2::objectFalse );
+            break;
+        case '<':
+            push( floatReceiver < floatArgument ? ObjectMemory2::objectTrue : ObjectMemory2::objectFalse );
+            break;
+        case 'l':
+            push( floatReceiver <= floatArgument ? ObjectMemory2::objectTrue : ObjectMemory2::objectFalse );
+            break;
+        case '>':
+            push( floatReceiver > floatArgument ? ObjectMemory2::objectTrue : ObjectMemory2::objectFalse );
+            break;
+        case 'g':
+            push( floatReceiver >= floatArgument ? ObjectMemory2::objectTrue : ObjectMemory2::objectFalse );
+            break;
+        }
+    }else
+        unPop(2);
+}
+
+float Interpreter::popFloat()
+{
+    OOP f = popStack();
+    successUpdate( memory->fetchClassOf(f) == ObjectMemory2::classFloat );
+    if( success )
+        return memory->fetchFloat(f);
+    else
+        return 0.0;
+}
+
+void Interpreter::pushFloat(float v)
+{
+    OOP f = memory->instantiateClassWithWords(ObjectMemory2::classFloat, 2);
+    memory->storeFloat(f,v);
+    push(f);
+}
+
+void Interpreter::primitiveAt()
+{
+    int index = positive16BitValueOf( popStack() );
+    OOP array = popStack();
+    OOP arrayClass = memory->fetchClassOf(array);
+    checkIndexableBoundsOf(index, array);
+    OOP result = 0;
+    if( success )
+    {
+        index  = index + fixedFieldsOf(arrayClass);
+        result = subscriptWith(array,index);
+    }
+    if( success )
+        push(result);
+    else
+        unPop(2);
+}
+
+void Interpreter::primitiveAtPut()
+{
+    OOP value = popStack();
+    int index = positive16BitValueOf( popStack() );
+    OOP array = popStack();
+    OOP arrayClass = memory->fetchClassOf(array);
+    checkIndexableBoundsOf(index,array);
+    if( success )
+    {
+        index = index + fixedFieldsOf(arrayClass);
+        subscriptWithStoring(array,index,value);
+    }
+    if( success )
+        push(value);
+    else
+        unPop(3);
+}
+
+void Interpreter::primitiveSize()
+{
+    OOP array = popStack();
+    OOP cls = memory->fetchClassOf(array);
+    OOP length = positive16BitIntegerFor( lengthOf(array) - fixedFieldsOf(cls) );
+    if( success )
+        push(length);
+    else
+        unPop(1);
+}
+
+void Interpreter::primitiveStringAt()
+{
+    int index = positive16BitValueOf( popStack() );
+    OOP array = popStack();
+    checkIndexableBoundsOf(index,array);
+    OOP character = 0;
+    if( success )
+    {
+        qint16 ascii = memory->integerValueOf( subscriptWith(array,index) );
+        character = memory->fetchPointerOfObject(ascii, ObjectMemory2::characterTable );
+    }
+    if( success )
+        push(character);
+    else
+        unPop(2);
+}
+
+void Interpreter::primitiveStringAtPut()
+{
+    OOP character = popStack();
+    int index = positive16BitValueOf( popStack() );
+    OOP array = popStack();
+    checkIndexableBoundsOf(index, array);
+    successUpdate( memory->fetchClassOf(character) == ObjectMemory2::classCharacter );
+    if( success )
+    {
+        OOP ascii = memory->fetchPointerOfObject(0,character);
+        subscriptWithStoring(array,index,ascii);
+    }
+    if( success )
+        push(character);
+    else
+        unPop(2);
+}
+
+void Interpreter::primitiveNext()
+{
+    OOP stream = popStack();
+    OOP array = memory->fetchPointerOfObject(StreamArrayIndex,stream);
+    OOP arrayClass = memory->fetchClassOf(array);
+    int index = fetchIntegerOfObject(StreamIndexIndex,stream);
+    int limit = fetchIntegerOfObject(StreamReadLimitIndex,stream);
+    successUpdate( index < limit );
+    successUpdate( arrayClass == ObjectMemory2::classArray || arrayClass == ObjectMemory2::classString );
+    checkIndexableBoundsOf( index + 1, array);
+    OOP result = 0;
+    if( success )
+    {
+        index++;
+        result = subscriptWith(array,index);
+    }
+    if( success )
+        storeIntegerOfObjectWithValue(StreamIndexIndex,stream,index);
+    if( success )
+    {
+        if( arrayClass == ObjectMemory2::classArray )
+            push(result);
+        else
+        {
+            int ascii = memory->integerValueOf(result);
+            push( memory->fetchPointerOfObject( ascii, ObjectMemory2::characterTable ) );
+        }
+    }else
+        unPop(1);
+}
+
+void Interpreter::primitiveNextPut()
+{
+    OOP value = popStack();
+    OOP stream = popStack();
+    OOP array = memory->fetchPointerOfObject(StreamArrayIndex, stream);
+    OOP arrayClass = memory->fetchClassOf(array);
+    int index = fetchIntegerOfObject(StreamIndexIndex,stream);
+    int limit = fetchIntegerOfObject(StreamWriteLimitIndex, stream);
+    successUpdate( index < limit );
+    successUpdate( arrayClass == ObjectMemory2::classArray || arrayClass == ObjectMemory2::classString );
+    checkIndexableBoundsOf( index + 1, array);
+    if( success )
+    {
+        index++;
+        if( arrayClass == ObjectMemory2::classArray )
+            subscriptWithStoring(array,index,value);
+        else
+        {
+            OOP ascii = memory->fetchPointerOfObject(0, value); // character value index 0
+            subscriptWithStoring(array, index, ascii );
+        }
+    }
+    if( success )
+        storeIntegerOfObjectWithValue(StreamIndexIndex, stream, index);
+    if( success )
+        push(value);
+    else
+        unPop(2);
+}
+
+void Interpreter::primitiveAtEnd()
+{
+    OOP stream = popStack();
+    OOP array = memory->fetchPointerOfObject(StreamArrayIndex, stream);
+    OOP arrayClass = memory->fetchClassOf(array);
+    int lenght = lengthOf(array);
+    int index = fetchIntegerOfObject(StreamIndexIndex,stream);
+    int limit = fetchIntegerOfObject(StreamReadLimitIndex, stream);
+    successUpdate( index < limit );
+    successUpdate( arrayClass == ObjectMemory2::classArray || arrayClass == ObjectMemory2::classString );
+    if( success )
+    {
+        if( index >= limit || index >= lenght )
+            push( ObjectMemory2::objectTrue );
+        else
+            push( ObjectMemory2::objectFalse );
+    }else
+        unPop(1);
+}
+
+void Interpreter::checkIndexableBoundsOf(int index, Interpreter::OOP array)
+{
+    OOP cls = memory->fetchClassOf(array);
+    successUpdate( index >= 1 );
+    successUpdate( index + fixedFieldsOf(cls) <= lengthOf(array) );
+}
+
+int Interpreter::lengthOf(Interpreter::OOP array)
+{
+    if( isWords( memory->fetchClassOf(array) ) )
+        return memory->fetchWordLenghtOf(array);
+    else
+        return memory->fetchByteLenghtOf(array);
+}
+
+Interpreter::OOP Interpreter::subscriptWith(Interpreter::OOP array, int index)
+{
+    OOP cls = memory->fetchClassOf(array);
+    if( isWords(cls) )
+    {
+        if( isPointers(cls) )
+            return memory->fetchPointerOfObject(index-1,array);
+        else
+        {
+            int value = memory->fetchWordOfObject(index-1,array);
+            return positive16BitIntegerFor(value);
+        }
+    }else
+    {
+        quint8 value = memory->fetchByteOfObject(index-1,array);
+        return memory->integerObjectOf(value);
+    }
+}
+
+void Interpreter::subscriptWithStoring(Interpreter::OOP array, int index, Interpreter::OOP value)
+{
+    OOP cls = memory->fetchClassOf(array);
+    if( isWords(cls) )
+    {
+        if( isPointers(cls) )
+        {
+            memory->storePointerOfObject(index-1, array, value );
+        }else
+        {
+            successUpdate( memory->isIntegerObject(value) );
+            if( success )
+                memory->storeWordOfObject(index-1,array,positive16BitValueOf(value) );
+        }
+    }else
+    {
+        successUpdate( memory->isIntegerObject(value) );
+        if( success )
+            memory->storeByteOfObject(index-1,array, memory->integerValueOf(value) & 0xff );
+    }
+}
+
+void Interpreter::primitiveObjectAt()
+{
+    qint16 index = popInteger();
+    OOP thisReceiver = popStack();
+    successUpdate( index > 0);
+    successUpdate( index <= ( memory->objectPointerCountOf(thisReceiver) ) );
+    if( success )
+        push( memory->fetchPointerOfObject(index-1, thisReceiver) );
+    else
+        unPop(2);
+}
+
+void Interpreter::primitiveObjectAtPut()
+{
+    OOP newValue = popStack();
+    qint16 index = popInteger();
+    OOP thisReceiver = popStack();
+    successUpdate( index > 0);
+    successUpdate( index <= ( memory->objectPointerCountOf(thisReceiver) ) );
+    if( success )
+    {
+        memory->storePointerOfObject(index-1, thisReceiver, newValue );
+        push( newValue );
+    }else
+        unPop(3);
+}
+
+void Interpreter::primitiveNew()
+{
+    OOP cls = popStack();
+    int size = fixedFieldsOf(cls);
+    successUpdate( !isIndexable(cls) );
+    if( success )
+    {
+        if( isPointers(cls) )
+            push( memory->instantiateClassWithPointers(cls,size) );
+        else
+            push( memory->instantiateClassWithWords(cls,size) );
+    }else
+        unPop(1);
+}
+
+void Interpreter::primitiveNewWithArg()
+{
+    int size = positive16BitValueOf( popStack() );
+    OOP cls = popStack();
+    successUpdate( isIndexable(cls) );
+    if( success )
+    {
+        size += fixedFieldsOf(cls);
+        if( isPointers(cls) )
+            push( memory->instantiateClassWithPointers(cls,size) );
+        else if( isWords(cls) )
+            push( memory->instantiateClassWithWords(cls,size) );
+        else
+            push( memory->instantiateClassWithBytes(cls,size) );
+    }else
+        unPop(2);
+}
+
+void Interpreter::primitiveBecome()
+{
+    OOP otherPointer = popStack();
+    OOP thisReceiver = popStack();
+    successUpdate( !memory->isIntegerObject(otherPointer) );
+    successUpdate( !memory->isIntegerObject(thisReceiver) );
+    if( success )
+    {
+        memory->swapPointersOf(thisReceiver,otherPointer);
+        push(thisReceiver);
+    }else
+        unPop(2);
+}
+
+void Interpreter::primitiveInstVarAt()
+{
+    int index = popInteger();
+    OOP thisReceiver = popStack();
+    checkInstanceVariableBoundsOf(index,thisReceiver);
+    OOP value = 0;
+    if( success )
+        value = subscriptWith(thisReceiver,index);
+    if( success )
+        push(value);
+    else
+        unPop(2);
+}
+
+void Interpreter::primitiveInstVarAtPut()
+{
+    OOP newValue = popStack();
+    int index = popInteger();
+    OOP thisReceiver = popStack();
+    checkInstanceVariableBoundsOf(index,thisReceiver);
+    if( success )
+        subscriptWithStoring(thisReceiver,index,newValue);
+    if( success )
+        push(newValue);
+    else
+        unPop(3);
+}
+
+void Interpreter::primitiveAsOop()
+{
+    OOP thisReceiver = popStack();
+    successUpdate( !memory->isIntegerObject(thisReceiver) );
+    if( success )
+        push( thisReceiver | 0x1 );
+    else
+        unPop(1);
+}
+
+void Interpreter::primitiveAsObject()
+{
+    OOP thisReceiver = popStack();
+    OOP newOop = thisReceiver & 0xfffe;
+    successUpdate( memory->hasObject( newOop ) ); // hasObject is not documented in BB
+    if( success )
+        push( newOop );
+    else
+        unPop(1);
+}
+
+void Interpreter::primitiveSomeInstance()
+{
+    OOP cls = popStack();
+    OOP next = memory->getNextInstance(cls);
+    if( next )
+        push(next);
+    else
+        primitiveFail();
+}
+
+void Interpreter::primitiveNextInstance()
+{
+    OOP object = popStack();
+    OOP cls = memory->fetchClassOf(object);
+    OOP next = memory->getNextInstance(cls, object);
+    if( next )
+        push(next);
+    else
+        primitiveFail();
+}
+
+void Interpreter::primitiveNewMethod()
+{
+    OOP header = popStack();
+    int bytecodeCount = popInteger();
+    OOP cls = popStack();
+    int size = memory->literalCountOfHeader(header) + 2 + bytecodeCount;
+    push( memory->instantiateClassWithBytes(cls,size) );
+}
+
+void Interpreter::checkInstanceVariableBoundsOf(int index, Interpreter::OOP object)
+{
+    // OOP cls = memory->fetchClassOf(object);
+    successUpdate( index >= 1 );
+    successUpdate( index <= lengthOf(object));
+}
+
+void Interpreter::primitiveValueWithArgs()
+{
+    OOP argumentArray = popStack();
+    OOP blockContext = popStack();
+    OOP blockArgumentCount = argumentCountOfBlock(blockContext);
+    OOP arrayClass = memory->fetchClassOf(argumentArray);
+    successUpdate( arrayClass == ObjectMemory2::classArray );
+    OOP arrayArgumentCount = 0;
+    if( success )
+    {
+        arrayArgumentCount = memory->fetchWordLenghtOf(argumentArray);
+        successUpdate( arrayArgumentCount == blockArgumentCount );
+    }
+    if( success )
+    {
+        transfer( arrayArgumentCount, 0, argumentArray, TempFrameStart, blockContext );
+        OOP initialIP = memory->fetchPointerOfObject(InitialIPIndex, blockContext);
+        memory->storePointerOfObject(InstructionPointerIndex, blockContext, initialIP );
+        storeStackPointerValueInContext( arrayArgumentCount, blockContext );
+        memory->storePointerOfObject(CallerIndex, blockContext, memory->getRegister(ActiveContext) );
+        newActiveContext( blockContext );
+    }else
+        unPop(2);
+}
+
+void Interpreter::primitivePerform()
+{
+    OOP performSelector = memory->getRegister(MessageSelector);
+    memory->setRegister(MessageSelector, stackValue(argumentCount-1));
+    OOP newReceiver = stackValue(argumentCount);
+    lookupMethodInClass( memory->fetchClassOf(newReceiver), performSelector ); // BB issue: performSelector missing
+    successUpdate( memory->argumentCountOf( memory->getRegister(NewMethod) ) == argumentCount - 1 );
+    if( success )
+    {
+        int selectorIndex = stackPointer - argumentCount + 1;
+        transfer( argumentCount -1 , selectorIndex + 1, memory->getRegister(ActiveContext),
+                  selectorIndex, memory->getRegister(ActiveContext) );
+        pop(1);
+        argumentCount--;
+        executeNewMethod();
+    }else
+        memory->setRegister(MessageSelector, performSelector );
+}
+
+void Interpreter::primitivePerformWithArgs()
+{
+    OOP argumentArray = popStack();
+    int arraySize = memory->fetchWordLenghtOf(argumentArray);
+    OOP arrayClass = memory->fetchClassOf(argumentArray);
+    successUpdate( (stackPointer+arraySize) < memory->fetchWordLenghtOf( memory->getRegister(ActiveContext) ) );
+    successUpdate( arrayClass = ObjectMemory2::classArray );
+    if( success )
+    {
+        OOP performSelector = memory->getRegister(MessageSelector);
+        memory->setRegister(MessageSelector, popStack());
+        OOP thisReceiver = stackTop();
+        argumentCount = arraySize;
+        int index = 1;
+        while( index <= argumentCount )
+        {
+            push( memory->fetchPointerOfObject(index-1, argumentArray) );
+            index++;
+        }
+        lookupMethodInClass( memory->fetchClassOf(thisReceiver), performSelector ); // BB issue: performSelector missing
+        successUpdate( memory->argumentCountOf( memory->getRegister(NewMethod) ) == argumentCount );
+        if( success )
+            executeNewMethod();
+        else
+        {
+            unPop(argumentCount);
+            push( memory->getRegister(MessageSelector));
+            push(argumentArray);
+            argumentCount = 2;
+            memory->setRegister(MessageSelector, performSelector );
+        }
+    }else
+        unPop(1);
+}
+
+void Interpreter::primitiveSignal()
+{
+    synchronousSignal( stackTop() );
+}
+
+void Interpreter::primitiveWait()
+{
+    OOP thisReceiver = stackTop();
+    int excessSignals = fetchIntegerOfObject( ExcessSignalIndex, thisReceiver );
+    if( excessSignals > 0 )
+        storeIntegerOfObjectWithValue( ExcessSignalIndex, thisReceiver, excessSignals - 1 );
+    else
+    {
+        addLastLinkToList( activeProcess(), thisReceiver );
+        suspendActive();
+    }
+}
+
+void Interpreter::primitiveResume()
+{
+    resume( stackTop() );
+}
+
+void Interpreter::primitiveSuspend()
+{
+    successUpdate( stackTop() == activeProcess() );
+    if( success )
+    {
+        popStack();
+        push( ObjectMemory2::objectNil );
+        suspendActive();
+    }
+}
+
+void Interpreter::primitiveFlushCache()
+{
+    // initializeMethodCache();
+    // we don't have that
+}
+
+void Interpreter::asynchronousSignal(Interpreter::OOP aSemaphore)
+{
+    semaphoreIndex++;
+    semaphoreList.append(aSemaphore);
+}
+
+bool Interpreter::isEmptyList(Interpreter::OOP aLinkedList)
+{
+    return memory->fetchPointerOfObject(FirstLinkIndex,aLinkedList) == ObjectMemory2::objectNil;
+}
+
+void Interpreter::synchronousSignal(Interpreter::OOP aSemaphore)
+{
+    if( isEmptyList(aSemaphore) )
+    {
+        int excessSignals = fetchIntegerOfObject(ExcessSignalIndex,aSemaphore);
+        storeIntegerOfObjectWithValue(ExcessSignalIndex, aSemaphore, excessSignals + 1 );
+    }else
+        resume( removeFirstLinkOfList(aSemaphore) );
+}
+
+Interpreter::OOP Interpreter::removeFirstLinkOfList(Interpreter::OOP aLinkedList)
+{
+    OOP firstLink = memory->fetchPointerOfObject(FirstLinkIndex,aLinkedList);
+    OOP lastLink = memory->fetchPointerOfObject(LastLinkIndex,aLinkedList);
+    if( firstLink == lastLink )
+    {
+        memory->storePointerOfObject(FirstLinkIndex, aLinkedList, ObjectMemory2::objectNil );
+        memory->storePointerOfObject(LastLinkIndex, aLinkedList, ObjectMemory2::objectNil );
+    }else
+    {
+        OOP nextLink = memory->fetchPointerOfObject(NextLinkIndex, firstLink );
+        memory->storePointerOfObject(FirstLinkIndex, aLinkedList, nextLink);
+    }
+    memory->storePointerOfObject(NextLinkIndex, firstLink, ObjectMemory2::objectNil );
+    return firstLink;
+}
+
+void Interpreter::transferTo(Interpreter::OOP aProcess)
+{
+    newProcessWaiting = true;
+    memory->setRegister(NewProcess,aProcess);
+}
+
+Interpreter::OOP Interpreter::activeProcess()
+{
+    if( newProcessWaiting )
+        return memory->getRegister(NewProcess);
+    else
+        return memory->fetchPointerOfObject( ActiveProcessIndex, schedulerPointer() );
+}
+
+Interpreter::OOP Interpreter::schedulerPointer()
+{
+    return memory->fetchPointerOfObject(ValueIndex, ObjectMemory2::processor );
+}
+
+Interpreter::OOP Interpreter::firstContext()
+{
+    newProcessWaiting = false;
+    return memory->fetchPointerOfObject( SuspendedContextIndex, activeProcess() );
+}
+
+void Interpreter::addLastLinkToList(Interpreter::OOP aLink, Interpreter::OOP aLinkedList)
+{
+    if( isEmptyList( aLinkedList ) )
+    {
+        memory->storePointerOfObject( FirstLinkIndex, aLinkedList, aLink );
+    }else
+    {
+        OOP lastLink = memory->fetchPointerOfObject( LastLinkIndex, aLinkedList );
+        memory->storePointerOfObject( NextLinkIndex, lastLink, aLink );
+    }
+    memory->storePointerOfObject( LastLinkIndex, aLinkedList, aLink );
+    memory->storePointerOfObject( MyListIndex, aLink, aLinkedList );
+}
+
+Interpreter::OOP Interpreter::wakeHighestPriority()
+{
+    OOP processLists = memory->fetchPointerOfObject( ProcessListIndex, schedulerPointer() );
+    int priority = memory->fetchWordLenghtOf( processLists );
+    OOP processList = 0;
+    while( true )
+    {
+        processList = memory->fetchPointerOfObject( priority - 1, processLists );
+        if( isEmptyList( processList ) )
+            priority--;
+        else
+            break;
+    }
+    return removeFirstLinkOfList( processList );
+}
+
+void Interpreter::sleep(Interpreter::OOP aProcess)
+{
+    int priority = fetchIntegerOfObject( PriorityIndex, aProcess );
+    OOP processLists = memory->fetchPointerOfObject( ProcessListIndex, schedulerPointer() );
+    OOP processList = memory->fetchPointerOfObject( priority - 1, processLists );
+    addLastLinkToList( aProcess, processList );
+}
+
+void Interpreter::resume(Interpreter::OOP aProcess)
+{
+    OOP activeProc = activeProcess();
+    int activePriority = fetchIntegerOfObject( PriorityIndex, activeProc );
+    int newPriority = fetchIntegerOfObject( PriorityIndex, aProcess );
+    if( newPriority > activePriority )
+    {
+        sleep( activeProc );
+        transferTo( activeProc );
+    }else
+        sleep( aProcess );
+}
+
+void Interpreter::suspendActive()
+{
+    transferTo( wakeHighestPriority() );
+}
+
+void Interpreter::primitiveQuit()
+{
+    Display::inst()->close();
 }
 
 void Interpreter::primitiveQuo()
@@ -1228,7 +2271,7 @@ void Interpreter::primitiveQuo()
     if( success )
     {
         integerResult = qRound( integerReceiver / integerArgument );
-        successUpdate( isIntegerValue(integerResult) );
+        successUpdate( memory->isIntegerValue(integerResult) );
     }
     if( success )
         pushInteger( integerResult );
@@ -1297,6 +2340,95 @@ void Interpreter::_bitImp(char op)
     else
         unPop(2);
 
+}
+
+void Interpreter::primitiveAsFloat()
+{
+    const qint16 integerReceiver = popInteger();
+    if( success )
+        pushFloat(integerReceiver);
+    else
+        unPop(1);
+}
+
+void Interpreter::primitiveFloatAdd()
+{
+    _floatOpImp('+');
+}
+
+void Interpreter::primitiveFloatSubtract()
+{
+    _floatOpImp('-');
+}
+
+void Interpreter::primitiveFloatLessThan()
+{
+    _floatCompImp('<');
+}
+
+void Interpreter::primitiveFloatGreaterThan()
+{
+    _floatCompImp('>');
+}
+
+void Interpreter::primitiveFloatLessOrEqual()
+{
+    _floatCompImp('l');
+}
+
+void Interpreter::primitiveFloatGreaterOrEqual()
+{
+    _floatCompImp('g');
+}
+
+void Interpreter::primitiveFloatEqual()
+{
+    _floatCompImp('=');
+}
+
+void Interpreter::primitiveFloatNotEqual()
+{
+    _floatCompImp('!');
+}
+
+void Interpreter::primitiveFloatMultiply()
+{
+    _floatOpImp('*');
+}
+
+void Interpreter::primitiveFloatDivide()
+{
+    _floatOpImp('/');
+}
+
+void Interpreter::primitiveTruncated()
+{
+    const float floatReceiver = popFloat();
+    const qint32 res = floatReceiver;
+    successUpdate( res & 0x7fff8000 == 0 );
+    if( success )
+        pushInteger(res);
+    else
+        unPop(1);
+
+}
+
+void Interpreter::primitiveFractionalPart()
+{
+    qWarning() << "primitiveFractionalPart not implemented";
+    primitiveFail(); // TODO
+}
+
+void Interpreter::primitiveExponent()
+{
+    qWarning() << "primitiveExponent not implemented";
+    primitiveFail(); // TODO
+}
+
+void Interpreter::primitiveTimesTwoPower()
+{
+    qWarning() << "primitiveTimesTwoPower not implemented";
+    primitiveFail(); // TODO
 }
 
 

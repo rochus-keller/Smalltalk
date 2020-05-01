@@ -126,24 +126,25 @@ namespace St
         quint16 fetchByteLenghtOf( quint16 objectPointer ) const;
         quint16 fetchWordLenghtOf( quint16 objectPointer ) const;
         ByteString fetchByteString( quint16 objectPointer ) const;
+        float fetchFloat( quint16 objectPointer ) const;
 
         quint16 instantiateClassWithPointers( quint16 classPointer, quint16 instanceSize );
         quint16 instantiateClassWithWords( quint16 classPointer, quint16 instanceSize );
         quint16 instantiateClassWithBytes( quint16 classPointer, quint16 instanceByteSize );
         QByteArray fetchClassName( quint16 classPointer ) const;
 
-        quint8 methodTemporaryCount( quint16 methodPointer ) const; // including args
-        CompiledMethodFlags methodFlags( quint16 methodPointer ) const;
-        bool methodLargeContext( quint16 methodPointer ) const;
-        quint8 methodLiteralCount( quint16 methodPointer ) const;
+        quint8 temporaryCountOf( quint16 methodPointer ) const; // including args
+        CompiledMethodFlags flagValueOf( quint16 methodPointer ) const;
+        bool largeContextFlagOf( quint16 methodPointer ) const;
+        quint8 literalCountOf( quint16 methodPointer ) const;
         ByteString methodBytecodes( quint16 methodPointer ) const;
-        quint8 methodArgumentCount(quint16 methodPointer ) const;
-        quint8 methodPrimitiveIndex(quint16 methodPointer ) const;
-        quint16 methodLiteral(quint8 index, quint16 methodPointer ) const;
+        quint8 argumentCountOf(quint16 methodPointer ) const;
+        quint8 primitiveIndexOf(quint16 methodPointer ) const;
+        quint16 literalOfMethod(quint8 index, quint16 methodPointer ) const;
         // last literal contains Association to superclass in case of super call
 
         static bool isPointer(quint16);
-        static qint16 toInt(quint16 objectPointer );
+        static qint16 integerValueOf(quint16 objectPointer );
 
     protected:
         void printObjectTable();

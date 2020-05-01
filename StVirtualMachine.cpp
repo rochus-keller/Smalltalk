@@ -20,18 +20,17 @@
 #include "StObjectMemory2.h"
 #include "StInterpreter.h"
 #include "StVirtualMachine.h"
+#include "StDisplay.h"
 #include <QApplication>
 #include <QFileDialog>
 #include <QMessageBox>
 using namespace St;
 
-VirtualMachine::VirtualMachine(QWidget *parent) : QWidget(parent)
+VirtualMachine::VirtualMachine(QObject* parent) : QObject(parent)
 {
     d_om = new ObjectMemory2(this);
     d_ip = new Interpreter(this);
     d_ip->setOm(d_om);
-
-    showMaximized();
 }
 
 void VirtualMachine::run(const QString& path)
@@ -39,21 +38,17 @@ void VirtualMachine::run(const QString& path)
     QFile in(path);
     if( !in.open(QIODevice::ReadOnly) )
     {
-        QMessageBox::critical(this,tr("Loading Smalltalk-80 Image"), tr("Cannot open file %1").arg(path) );
+        QMessageBox::critical(Display::inst(),tr("Loading Smalltalk-80 Image"), tr("Cannot open file %1").arg(path) );
         return;
     }
     const bool res = d_om->readFrom(&in);
     if( !res )
     {
-        QMessageBox::critical(this,tr("Loading Smalltalk-80 Image"), tr("Incompatible format.") );
+        QMessageBox::critical(Display::inst(),tr("Loading Smalltalk-80 Image"), tr("Incompatible format.") );
         return;
     }
 
-    while( isVisible() )
-    {
-        d_ip->cycle();
-        qApp->processEvents();
-    }
+    d_ip->interpret();
 }
 
 
@@ -72,7 +67,7 @@ int main(int argc, char *argv[])
         w.run( a.arguments()[1] );
     else
     {
-        const QString path = QFileDialog::getOpenFileName(&w,VirtualMachine::tr("Open Smalltalk-80 Image File"),
+        const QString path = QFileDialog::getOpenFileName(Display::inst(),VirtualMachine::tr("Open Smalltalk-80 Image File"),
                                                           QString(), "VirtualImage *.image *.im" );
         if( path.isEmpty() )
             return 0;

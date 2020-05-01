@@ -29,12 +29,14 @@ INCLUDEPATH += ..
 SOURCES +=\
     StInterpreter.cpp \
     StObjectMemory2.cpp \
-    StVirtualMachine.cpp
+    StVirtualMachine.cpp \
+    StDisplay.cpp
 
 HEADERS  += \
     StInterpreter.h \
     StObjectMemory2.h \
-    StVirtualMachine.h
+    StVirtualMachine.h \
+    StDisplay.h
 
 
 CONFIG(debug, debug|release) {

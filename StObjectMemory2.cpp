@@ -20,6 +20,7 @@
 #include "StObjectMemory2.h"
 #include <QIODevice>
 #include <QtDebug>
+#include <QtMath>
 using namespace St;
 
 // According to "Smalltalk-80: Virtual Image Version 2", Xerox PARC, 1983
@@ -164,9 +165,9 @@ bool ObjectMemory2::readFrom(QIODevice* in)
         d_classes << fetchPointerOfObject(0,cls); // superclass of cls
         if( cls == classCompiledMethod )
         {
-            for( int j = 0; j < methodLiteralCount(oop); j++ )
+            for( int j = 0; j < literalCountOf(oop); j++ )
             {
-                const OOP ptr = methodLiteral(j,oop);
+                const OOP ptr = literalOfMethod(j,oop);
                 if( !isInt(ptr) && ptr != objectNil && ptr != objectTrue && ptr != objectFalse )
                     d_xref[ptr].append(oop);
             }
@@ -221,9 +222,18 @@ QList<quint16> ObjectMemory2::getAllValidOop() const
     return res;
 }
 
+int ObjectMemory2::getOopsLeft() const
+{
+    int count = 0;
+    for( int i = 0; i < d_ot.d_slots.size(); i++ )
+        if( d_ot.d_slots[i].isFree() )
+            count++;
+    return count;
+}
+
 void ObjectMemory2::setRegister(quint8 index, quint16 value)
 {
-    if( index > d_registers.size() )
+    if( index >= d_registers.size() )
         d_registers.resize( d_registers.size() + 10 );
     d_registers[index] = value;
 }
@@ -244,6 +254,21 @@ void ObjectMemory2::addTemp(OOP oop)
 void ObjectMemory2::removeTemp(ObjectMemory2::OOP oop)
 {
     d_temps.remove(oop);
+}
+
+ObjectMemory2::OOP ObjectMemory2::getNextInstance(ObjectMemory2::OOP cls, ObjectMemory2::OOP cur) const
+{
+    int start = 0;
+    if( cur )
+        start = ( cur >> 1 ) + 1;
+    for( int i = start; i < d_ot.d_slots.size(); i++ )
+    {
+        if( d_ot.d_slots[i].isFree() )
+            continue;
+        if( d_ot.d_slots[i].d_class == cls )
+            return i << 1;
+    }
+    return 0;
 }
 
 bool ObjectMemory2::hasPointerMembers(OOP objectPointer) const
@@ -352,6 +377,63 @@ ObjectMemory2::ByteString ObjectMemory2::fetchByteString(OOP objectPointer) cons
     return ByteString( s.d_obj->d_data, s.byteLen() );
 }
 
+float ObjectMemory2::fetchFloat(ObjectMemory2::OOP objectPointer) const
+{
+    // Examples of Float instance bytes
+    // 00000000 0.0
+    // 3f800000 1.0
+    // 3e999999 0.3
+    // 40000000 2.0
+    // 40c00000 6.0
+    // 40800000 4.0
+    // 4048f5c2 3.14
+    // 3e6b851e 0.23
+
+    Q_ASSERT( fetchByteLenghtOf(objectPointer) == 4 );
+    union {
+        float f;
+        quint32 w;
+    };
+#ifdef _DEBUG
+    // The BB corresponds to the IEEE 754 32 bit floating point version
+    w = 0x4048f5c2; // 3.14 rounded
+    Q_ASSERT( qFabs( f - 3.1399998 ) < 0.0000001 );
+#endif
+    w = fetchWordOfObject(0,objectPointer) << 16 | fetchWordOfObject(1,objectPointer);
+    return f;
+}
+
+void ObjectMemory2::storeFloat(ObjectMemory2::OOP objectPointer, float v)
+{
+    Q_ASSERT( fetchByteLenghtOf(objectPointer) == 4 );
+    union {
+        float f;
+        quint32 w;
+    };
+    f = v;
+    storeWordOfObject(0,objectPointer,( w >> 16 ) & 0xffff);
+    storeWordOfObject(1,objectPointer, w & 0xffff );
+}
+
+void ObjectMemory2::swapPointersOf(ObjectMemory2::OOP firstPointer, ObjectMemory2::OOP secondPointer)
+{
+    const quint32 i1 = firstPointer >> 1;
+    const quint32 i2 = secondPointer >> 1;
+    Q_ASSERT( i1 < d_ot.d_slots.size() && i2 < d_ot.d_slots.size() );
+    OtSlot tmp =  d_ot.d_slots[i1];
+    d_ot.d_slots[i1] = d_ot.d_slots[i2];
+    d_ot.d_slots[i2] = tmp;
+}
+
+bool ObjectMemory2::hasObject(OOP ptr) const
+{
+    const quint32 i = ptr >> 1;
+    if( i < d_ot.d_slots.size() )
+        return !d_ot.d_slots[i].isFree();
+    else
+        return false;
+}
+
 QByteArray ObjectMemory2::fetchClassName(OOP classPointer) const
 {
     if( d_classes.contains(classPointer) )
@@ -373,32 +455,41 @@ QByteArray ObjectMemory2::fetchClassName(OOP classPointer) const
     return QByteArray();
 }
 
-quint8 ObjectMemory2::methodTemporaryCount(OOP methodPointer) const
+quint8 ObjectMemory2::temporaryCountOf(OOP methodPointer) const
 {
+    Q_ASSERT(methodPointer);
     const OtSlot& s = getSlot(methodPointer);
     Q_ASSERT( s.getClass() == ObjectMemory2::classCompiledMethod );
     return s.d_obj->d_data[0] & 0x1f;
 }
 
-ObjectMemory2::CompiledMethodFlags ObjectMemory2::methodFlags(OOP methodPointer) const
+ObjectMemory2::CompiledMethodFlags ObjectMemory2::flagValueOf(OOP methodPointer) const
 {
+    Q_ASSERT(methodPointer);
     const OtSlot& s = getSlot(methodPointer);
     Q_ASSERT( s.getClass() == ObjectMemory2::classCompiledMethod );
     return CompiledMethodFlags( getMethodFlags( s.d_obj->d_data[0] ) );
 }
 
-bool ObjectMemory2::methodLargeContext(OOP methodPointer) const
+bool ObjectMemory2::largeContextFlagOf(OOP methodPointer) const
 {
+    Q_ASSERT(methodPointer);
     const OtSlot& s = getSlot(methodPointer);
     Q_ASSERT( s.getClass() == ObjectMemory2::classCompiledMethod );
     return ( s.d_obj->d_data[1] & 0x80 );
 }
 
-quint8 ObjectMemory2::methodLiteralCount(OOP methodPointer) const
+quint8 ObjectMemory2::literalCountOf(OOP methodPointer) const
 {
+    Q_ASSERT(methodPointer);
     const OtSlot& s = getSlot(methodPointer);
     Q_ASSERT( s.getClass() == ObjectMemory2::classCompiledMethod );
     return getLiteralByteCount( s.d_obj->d_data ) / 2;
+}
+
+quint8 ObjectMemory2::literalCountOfHeader(OOP header) const
+{
+    return ( ( header >> 1 ) & 0x3f ); // TODO: check
 }
 
 ObjectMemory2::ByteString ObjectMemory2::methodBytecodes(OOP methodPointer) const
@@ -411,7 +502,7 @@ ObjectMemory2::ByteString ObjectMemory2::methodBytecodes(OOP methodPointer) cons
     return ByteString( bytes, byteLen );
 }
 
-quint8 ObjectMemory2::methodArgumentCount(OOP methodPointer) const
+quint8 ObjectMemory2::argumentCountOf(OOP methodPointer) const
 {
     const OtSlot& s = getSlot(methodPointer);
     Q_ASSERT( s.getClass() == ObjectMemory2::classCompiledMethod );
@@ -427,7 +518,7 @@ quint8 ObjectMemory2::methodArgumentCount(OOP methodPointer) const
     return ( extension >> 9 ) & 0x1f;
 }
 
-quint8 ObjectMemory2::methodPrimitiveIndex(OOP methodPointer) const
+quint8 ObjectMemory2::primitiveIndexOf(OOP methodPointer) const
 {
     const OtSlot& s = getSlot(methodPointer);
     Q_ASSERT( s.getClass() == ObjectMemory2::classCompiledMethod );
@@ -441,7 +532,7 @@ quint8 ObjectMemory2::methodPrimitiveIndex(OOP methodPointer) const
     return ( extension >> 1 ) & 0xff;
 }
 
-ObjectMemory2::OOP ObjectMemory2::methodLiteral(quint8 index, OOP methodPointer) const
+ObjectMemory2::OOP ObjectMemory2::literalOfMethod(quint8 index, OOP methodPointer) const
 {
     const OtSlot& s = getSlot(methodPointer);
     Q_ASSERT( s.getClass() == ObjectMemory2::classCompiledMethod );
@@ -451,15 +542,15 @@ ObjectMemory2::OOP ObjectMemory2::methodLiteral(quint8 index, OOP methodPointer)
     return readU16( s.d_obj->d_data, methHdrByteLen + byteIndex );
 }
 
-quint32 ObjectMemory2::methodInitialInstructionPointer(ObjectMemory2::OOP methodPointer) const
+quint32 ObjectMemory2::initialInstructionPointerOfMethod(ObjectMemory2::OOP methodPointer) const
 {
-    return ( methodLiteralCount(methodPointer) + ValueIndex ) * 2 + 1;
+    return ( literalCountOf(methodPointer) + ValueIndex ) * 2 + 1;
 }
 
 ObjectMemory2::OOP ObjectMemory2::methodClassOf(ObjectMemory2::OOP methodPointer) const
 {
-    const quint16 literalCount = methodLiteralCount(methodPointer);
-    OOP association = methodLiteral(literalCount-1, methodPointer);
+    const quint16 literalCount = literalCountOf(methodPointer);
+    OOP association = literalOfMethod(literalCount-1, methodPointer);
     return fetchPointerOfObject(ValueIndex,association);
 }
 
@@ -468,7 +559,12 @@ bool ObjectMemory2::isPointer(OOP ptr)
     return !isInt(ptr);
 }
 
-qint16 ObjectMemory2::toInt(OOP objectPointer)
+bool ObjectMemory2::isIntegerObject(ObjectMemory2::OOP objectPointer)
+{
+    return isInt(objectPointer);
+}
+
+qint16 ObjectMemory2::integerValueOf(OOP objectPointer)
 {
     if( isInt(objectPointer) )
     {
@@ -483,7 +579,7 @@ qint16 ObjectMemory2::toInt(OOP objectPointer)
         return 0;
 }
 
-ObjectMemory2::OOP ObjectMemory2::toPtr(qint16 value)
+ObjectMemory2::OOP ObjectMemory2::integerObjectOf(qint16 value)
 {
     OOP res = 0;
     if( value >= 0 )
@@ -495,6 +591,11 @@ ObjectMemory2::OOP ObjectMemory2::toPtr(qint16 value)
         res = ( res << 1 ) | 1; // TODO: to TEST
     }
     return res;
+}
+
+bool ObjectMemory2::isIntegerValue(int valueWord)
+{
+    return valueWord <= -16834 && valueWord > 16834;
 }
 
 int ObjectMemory2::findFreeSlot()
@@ -588,10 +689,10 @@ void ObjectMemory2::mark(OOP oop)
         }
     }else if( s.d_class == classCompiledMethod )
     {
-        const quint16 len = methodLiteralCount(oop);
+        const quint16 len = literalCountOf(oop);
         for( int i = 0; i < len; i++ )
         {
-            quint16 sub = methodLiteral(i, oop);
+            quint16 sub = literalOfMethod(i, oop);
             if( isPointer(sub) )
                 mark( sub );
         }
