@@ -23,8 +23,16 @@
 #include <QApplication>
 using namespace St;
 
+#define ST_TRACE_BYTECODE(msg) qDebug() << "Bytecode" << ( "<" + QByteArray::number(currentBytecode) + ">" ).constData() \
+    << __FUNCTION__ << msg;
+#define ST_TRACE_PRIMITIVE(msg) qDebug() << "Primitive" << ( "#" + QByteArray::number(primitiveIndex)  ).constData() \
+    << __FUNCTION__ << msg;
+#define ST_TRACE_METHOD_CALL qDebug() << ( "[cycle=" + QByteArray::number(cycleNr) + "]" ).constData() << \
+    memory->prettyValue(stackValue(argumentCount) ).constData() << \
+    memory->fetchByteArray(memory->getRegister(MessageSelector)).constData() << prettyArgs_().constData();
+
 Interpreter::Interpreter(QObject* p):QObject(p),memory(0),stackPointer(0),instructionPointer(0),d_run(false),
-    semaphoreIndex(0), newProcessWaiting(false)
+    semaphoreIndex(0), newProcessWaiting(false),cycleNr(0)
 {
 
 }
@@ -37,8 +45,17 @@ void Interpreter::setOm(ObjectMemory2* om)
 void Interpreter::interpret()
 {
     d_run = true;
+    cycleNr = 0;
     newActiveContext( firstContext() ); // BB: When Smalltalk is started up, ...
-    while( d_run )
+    //OOP method = memory->getRegister(Method);
+    //QPair<OOP,OOP> selector = memory->findSelectorAndOwningClassOf(method);
+    //memory->setRegister(MessageSelector,selector.first);
+
+    // apparently the system is in ScreenController->startUp->controlLoop->controlActivity->yellowButtonActivity
+    //     ->quit->saveAs:thenQuit:->snapshotAs:thenQuit:
+    // top: BlockContext->newProcess, ControllManager->activeController:
+
+    while( d_run && cycleNr < 500 ) // TEST
     {
         cycle();
         qApp->processEvents();
@@ -149,7 +166,7 @@ Interpreter::OOP Interpreter::sender()
 
 Interpreter::OOP Interpreter::caller()
 {
-    return memory->fetchPointerOfObject(CallerIndex, memory->getRegister(HomeContext) );
+    return memory->fetchPointerOfObject(CallerIndex, memory->getRegister(ActiveContext) );
 }
 
 Interpreter::OOP Interpreter::temporary(qint16 offset)
@@ -162,36 +179,52 @@ Interpreter::OOP Interpreter::literal(qint16 offset)
     return memory->literalOfMethod( offset, memory->getRegister(Method) );
 }
 
-Interpreter::OOP Interpreter::lookupMethodInDictionary(Interpreter::OOP dictionary, OOP selector)
+bool Interpreter::lookupMethodInDictionary(Interpreter::OOP dictionary)
 {
+    OOP messageSelector = memory->getRegister(MessageSelector);
+
     // Just a trivial linear scan; not the more fancy hash lookup described in the Blue Book
-    OOP arr = memory->fetchPointerOfObject(1,dictionary);
     const int SelectorStart = 2;
-    for( int i = SelectorStart; i < memory->fetchWordLenghtOf(dictionary); i++ )
+    const int MethodArrayIndex = 1;
+    int length = memory->fetchWordLenghtOf(dictionary);
+    for( int index = SelectorStart; index < length; index++ )
     {
-        OOP sym = memory->fetchPointerOfObject(i,dictionary);
-        if( sym == selector )
-            return memory->fetchPointerOfObject(i-SelectorStart,arr);
+        OOP selector = memory->fetchPointerOfObject(index,dictionary);
+        if( selector == messageSelector )
+        {
+            OOP methodArray = memory->fetchPointerOfObject(MethodArrayIndex,dictionary);
+            OOP newMethod = memory->fetchPointerOfObject(index-SelectorStart,methodArray);
+            memory->setRegister(NewMethod,newMethod);
+            primitiveIndex = memory->primitiveIndexOf(newMethod);
+            return true;
+        }
     }
-    return 0;
+    return false;
 }
 
-Interpreter::OOP Interpreter::lookupMethodInClass(Interpreter::OOP cls, Interpreter::OOP selector)
+bool Interpreter::lookupMethodInClass(Interpreter::OOP cls)
 {
-    while( cls == ObjectMemory2::objectNil )
+    OOP currentClass = cls;
+    while( currentClass != ObjectMemory2::objectNil )
     {
-        OOP res = lookupMethodInDictionary( memory->fetchPointerOfObject(MessageDictIndex,cls), selector );
-        if( res )
-            return res;
-        cls = lookupMethodInClass( superclassOf(cls), selector );
+        OOP dictionary = memory->fetchPointerOfObject(MessageDictionaryIndex, currentClass);
+        if( lookupMethodInDictionary( dictionary ) )
+        {
+            //qDebug() << "found method" << memory->fetchByteArray(memory->getRegister(MessageSelector))
+            //         << "in" << memory->fetchClassName(currentClass);
+            return true;
+        }
+        currentClass = superclassOf(currentClass);
     }
-    if( selector == ObjectMemory2::symbolDoesNotUnderstand )
+    if( memory->getRegister(MessageSelector) == ObjectMemory2::symbolDoesNotUnderstand )
     {
-        qCritical() << "Recursive not understood error encountered";
-        return 0;
+        qCritical() << "ERROR: Recursive not understood error encountered";
+        // TODO: self error:
+        return false;
     }
-    // TODO createActualMessage
-    return ObjectMemory2::symbolDoesNotUnderstand;
+    createActualMessage();
+    memory->setRegister(MessageSelector, ObjectMemory2::symbolDoesNotUnderstand );
+    return lookupMethodInClass(cls);
 }
 
 Interpreter::OOP Interpreter::superclassOf(Interpreter::OOP cls)
@@ -233,6 +266,7 @@ void Interpreter::cycle()
 {
     checkProcessSwitch();
     currentBytecode = fetchByte();
+    cycleNr++;
     dispatchOnThisBytecode();
 }
 
@@ -265,7 +299,7 @@ void Interpreter::dispatchOnThisBytecode()
     else if( b >= 144 && b <= 175 )
         jumpBytecode();
     else if( b >= 138 && b <= 143 )
-        qWarning() << "hit unused bytecode";
+        qWarning() << "hit unused bytecode" << b;
 }
 
 bool Interpreter::stackBytecode()
@@ -284,17 +318,17 @@ bool Interpreter::stackBytecode()
     if( b >= 104 && b <= 111 )
         return storeAndPopTemoraryVariableBytecode();
     if( b == 112 )
-        return pushConstantBytecode();
+        return pushReceiverBytecode();
     if( b >= 113 && b <= 119 )
         return pushConstantBytecode();
     if( b == 128 )
         return extendedPushBytecode();
     if( b == 129 )
-        return extendedStoreBytecode();
+        return extendedStoreBytecode(false);
     if( b == 130 )
         return extendedStoreAndPopBytecode();
     if( b == 135 )
-        return popStackBytecode();
+        return popStackBytecode(false);
     if( b == 136 )
         return duplicateTopBytecode();
     if( b == 137 )
@@ -364,6 +398,7 @@ bool Interpreter::jumpBytecode()
 
 bool Interpreter::pushReceiverVariableBytecode()
 {
+    ST_TRACE_BYTECODE("");
     push( memory->fetchPointerOfObject( currentBytecode & 0xf, memory->getRegister(Receiver) ) );
     // "Push Receiver Variable #%1").arg( b & 0xf ), 1 );
     return true;
@@ -371,15 +406,20 @@ bool Interpreter::pushReceiverVariableBytecode()
 
 bool Interpreter::pushTemporaryVariableBytecode()
 {
+    int var = currentBytecode & 0xf;
+    OOP val = temporary( var );
+    ST_TRACE_BYTECODE( "variable" << var << "value" << memory->prettyValue(val) );
     // "Push Temporary Location #%1").arg( b & 0xf ), 1 );
-    push( temporary( currentBytecode & 0xf ) );
+    push( val );
     return true;
 }
 
 bool Interpreter::pushLiteralConstantBytecode()
 {
+    OOP lit = literal( currentBytecode & 0x1f );
+    ST_TRACE_BYTECODE( "literal" << (currentBytecode & 0x1f) << memory->prettyValue(lit).constData() );
     // "Push Literal Constant #%1").arg( b & 0x1f ), 1 );
-    push( literal( currentBytecode & 0x1f ) );
+    push( lit );
     return true;
 }
 
@@ -387,6 +427,7 @@ static const quint16 ValueIndex = 1;
 
 bool Interpreter::pushLiteralVariableBytecode()
 {
+    ST_TRACE_BYTECODE("");
     // "Push Literal Variable #%1").arg( b & 0x1f ), 1 );
     quint16 assoc = literal( currentBytecode & 0x1f );
     push( memory->fetchPointerOfObject( ValueIndex, assoc ) );
@@ -395,6 +436,7 @@ bool Interpreter::pushLiteralVariableBytecode()
 
 bool Interpreter::storeAndPopReceiverVariableBytecode()
 {
+    ST_TRACE_BYTECODE("");
     // "Pop and Store Receiver Variable #%1").arg( b & 0x7 ), 1 );
     memory->storePointerOfObject( currentBytecode  & 0x7, memory->getRegister(Receiver), popStack() );
     return true;
@@ -402,6 +444,7 @@ bool Interpreter::storeAndPopReceiverVariableBytecode()
 
 bool Interpreter::storeAndPopTemoraryVariableBytecode()
 {
+    ST_TRACE_BYTECODE("");
     // "Pop and Store Temporary Location #%1").arg( b & 0x7 ), 1 );
     memory->storePointerOfObject( ( currentBytecode & 0x7 ) + TempFrameStart, memory->getRegister(HomeContext), popStack() );
     return true;
@@ -409,12 +452,15 @@ bool Interpreter::storeAndPopTemoraryVariableBytecode()
 
 bool Interpreter::pushReceiverBytecode()
 {
-    push( memory->getRegister(Receiver) );
+    OOP val = memory->getRegister(Receiver);
+    ST_TRACE_BYTECODE("value" << memory->prettyValue(val).constData());
+    push( val );
     return true;
 }
 
 bool Interpreter::pushConstantBytecode()
 {
+    ST_TRACE_BYTECODE("");
     // "Push (receiver, true, false, nil, -1, 0, 1, 2) [%1]").arg( b & 0x7 ), 1 );
     switch( currentBytecode )
     {
@@ -448,6 +494,7 @@ bool Interpreter::pushConstantBytecode()
 
 bool Interpreter::extendedPushBytecode()
 {
+    ST_TRACE_BYTECODE("");
     // "Push (Receiver Variable, Temporary Location, Literal Constant, Literal Variable) [%1] #%2").
                               // arg( ( bc[pc+1] >> 6 ) & 0x3 ).arg( bc[pc+1] & 0x3f), 2 );
     const quint16 descriptor = fetchByte();
@@ -473,8 +520,10 @@ bool Interpreter::extendedPushBytecode()
     return true;
 }
 
-bool Interpreter::extendedStoreBytecode()
+bool Interpreter::extendedStoreBytecode(bool subcall)
 {
+    if( !subcall )
+        ST_TRACE_BYTECODE("");
     // "Store (Receiver Variable, Temporary Location, Illegal, Literal Variable) [%1] #%2").
                               // arg( ( bc[pc+1] >> 6 ) & 0x3 ).arg( bc[pc+1] & 0x3f), 2 );
     const quint16 descriptor = fetchByte();
@@ -489,7 +538,8 @@ bool Interpreter::extendedStoreBytecode()
         memory->storePointerOfObject(variableIndex+TempFrameStart,memory->getRegister(HomeContext),stackTop());
         break;
     case 2:
-        qCritical() << "illegal store";
+        qCritical() << "ERROR: illegal store";
+        // TODO: self error:
         break;
     case 3:
         memory->storePointerOfObject(ValueIndex, literal(variableIndex), stackTop() );
@@ -502,14 +552,17 @@ bool Interpreter::extendedStoreBytecode()
 
 bool Interpreter::extendedStoreAndPopBytecode()
 {
+    ST_TRACE_BYTECODE("");
     // "Pop and Store (Receiver Variable, Temporary Location, Illegal, Literal Variable) [%1] #%2").
                              // arg( ( bc[pc+1] >> 6 ) & 0x3 ).arg( bc[pc+1] & 0x3f), 2 );
-    extendedStoreBytecode();
-    return popStackBytecode();
+    extendedStoreBytecode(true);
+    return popStackBytecode(true);
 }
 
-bool Interpreter::popStackBytecode()
+bool Interpreter::popStackBytecode(bool subcall)
 {
+    if( !subcall )
+        ST_TRACE_BYTECODE("");
     // "Pop Stack Top" ), 1 );
     popStack();
     return true;
@@ -517,6 +570,7 @@ bool Interpreter::popStackBytecode()
 
 bool Interpreter::duplicateTopBytecode()
 {
+    ST_TRACE_BYTECODE("");
     // "Duplicate Stack Top" ), 1 );
     push( stackTop() );
     return true;
@@ -524,6 +578,7 @@ bool Interpreter::duplicateTopBytecode()
 
 bool Interpreter::pushActiveContextBytecode()
 {
+    ST_TRACE_BYTECODE("");
     // "Push Active Context" ), 1 );
     push( memory->getRegister( ActiveContext ) );
     return true;
@@ -531,6 +586,7 @@ bool Interpreter::pushActiveContextBytecode()
 
 bool Interpreter::shortUnconditionalJump()
 {
+    ST_TRACE_BYTECODE("");
      // "Jump %1 + 1 (i.e., 1 through 8)").arg( b & 0x7 ), 1 );
     const quint32 offset = currentBytecode & 0x7;
     jump( offset + 1 );
@@ -539,6 +595,7 @@ bool Interpreter::shortUnconditionalJump()
 
 bool Interpreter::shortContidionalJump()
 {
+    ST_TRACE_BYTECODE("");
     // "Pop and Jump 0n False %1 +1 (i.e., 1 through 8)").arg( b & 0x7 ), 1 );
     const quint32 offset = currentBytecode & 0x7;
     jumpif( ObjectMemory2::objectFalse, offset + 1 );
@@ -547,6 +604,7 @@ bool Interpreter::shortContidionalJump()
 
 bool Interpreter::longUnconditionalJump()
 {
+    ST_TRACE_BYTECODE("");
     // "Jump(%1 - 4) *256+%2").arg( b & 0x7 ).arg( bc[pc+1] ), 2 );
     const quint32 offset = currentBytecode & 0x7;
     jump( ( offset - 4 ) * 256 + fetchByte() );
@@ -555,15 +613,16 @@ bool Interpreter::longUnconditionalJump()
 
 bool Interpreter::longConditionalJump()
 {
+    ST_TRACE_BYTECODE("");
     // "Pop and Jump On True %1 *256+%2").arg( b & 0x3 ).arg( bc[pc+1] ), 2 );
     // "Pop and Jump On False %1 *256+%2").arg( b & 0x3 ).arg( bc[pc+1] ), 2 );
 
     quint32 offset = currentBytecode & 0x3;
     offset = offset * 256 + fetchByte();
-    if( currentBytecode <= 171 )
-        jumpif( ObjectMemory2::objectTrue, offset + 1 ); // TODO: stimmt + 1? BB fehlt das
-    else
-        jumpif( ObjectMemory2::objectFalse, offset + 1 );
+    if( currentBytecode >= 168 && currentBytecode <= 171 )
+        jumpif( ObjectMemory2::objectTrue, offset );
+    if( currentBytecode >= 172 && currentBytecode <= 175 )
+        jumpif( ObjectMemory2::objectFalse, offset );
     return true;
 }
 
@@ -587,6 +646,7 @@ bool Interpreter::extendedSendBytecode()
 
 bool Interpreter::singleExtendedSendBytecode()
 {
+    ST_TRACE_BYTECODE("");
     // "Send Literal Selector #%2 With %1 Arguments").arg( ( bc[pc+1] >> 5 ) & 0x7 ).arg( bc[pc+1] & 0x1f), 2 );
     const quint8 descriptor = fetchByte();
     const quint8 selectorIndex = descriptor & 0x1f;
@@ -596,6 +656,7 @@ bool Interpreter::singleExtendedSendBytecode()
 
 bool Interpreter::doubleExtendedSendBytecode()
 {
+    ST_TRACE_BYTECODE("");
     // "Send Literal Selector #%2 With %1 Arguments").arg( bc[pc+1] ).arg( bc[pc+2]), 3 );
     const quint8 count = fetchByte();
     const OOP selector = literal( fetchByte() );
@@ -605,6 +666,7 @@ bool Interpreter::doubleExtendedSendBytecode()
 
 bool Interpreter::singleExtendedSuperBytecode()
 {
+    ST_TRACE_BYTECODE("");
     // "Send Literal Selector #%2 To Superclass With %1 Arguments").arg( ( bc[pc+1] >> 5 ) & 0x7 ).arg( bc[pc+1] & 0x1f), 2 );
     const quint8 descriptor = fetchByte();
     argumentCount = ( descriptor >> 5 ) & 0x7;
@@ -617,6 +679,7 @@ bool Interpreter::singleExtendedSuperBytecode()
 
 bool Interpreter::doubleExtendedSuperBytecode()
 {
+    ST_TRACE_BYTECODE("");
     // "Send Literal Selector #%2 To Superclass With %1 Arguments").arg( bc[pc+1] ).arg( bc[pc+2]), 3 );
     argumentCount = fetchByte();
     memory->setRegister( MessageSelector, literal( fetchByte() ));
@@ -627,16 +690,17 @@ bool Interpreter::doubleExtendedSuperBytecode()
 
 bool Interpreter::sendSpecialSelectorBytecode()
 {
+    ST_TRACE_BYTECODE("message" << ( currentBytecode & 0xf ) );
     // see array 0x30 specialSelectors
     // "Send Arithmetic Message #%1" ).arg( b & 0xf ), 1 );
     // "Send Special Message #%1" ).arg( b & 0xf ), 1 );
-    if( specialSelectorPrimitiveResponse() )
-        return true;
-    const quint16 selectorIndex = ( currentBytecode - 176 ) * 2;
-    OOP selector = memory->fetchPointerOfObject(selectorIndex, ObjectMemory2::specialSelectors );
-    const quint16 count = ObjectMemory2::integerValueOf( memory->fetchWordOfObject(
-                                                    selectorIndex + 1, ObjectMemory2::specialSelectors ) );
-    sendSelector( selector, count );
+    if( !specialSelectorPrimitiveResponse() )
+    {
+        const quint16 selectorIndex = ( currentBytecode - 176 ) * 2;
+        OOP selector = memory->fetchPointerOfObject(selectorIndex, ObjectMemory2::specialSelectors );
+        const quint16 count = fetchIntegerOfObject( selectorIndex + 1, ObjectMemory2::specialSelectors );
+        sendSelector( selector, count );
+    }
     return true;
 }
 
@@ -645,8 +709,11 @@ bool Interpreter::sendLiteralSelectorBytecode()
     // "Send Literal Selector #%1 With No Arguments" ).arg( b & 0xf ), 1 );
     // "Send Literal Selector #%1 With 1 Argument" ).arg( b & 0xf ), 1 );
     // "Send Literal Selector #%1 With 2 Arguments" ).arg( b & 0xf ), 1 );
-
-    return true; // TODO
+    int args = ( ( currentBytecode >> 4 ) & 0x3 ) - 1;
+    OOP selector = literal( currentBytecode & 0xf );
+    ST_TRACE_BYTECODE( "literal" << ( currentBytecode & 0xf ) << memory->prettyValue(selector).constData() << "args" << args);
+    sendSelector( selector, args );
+    return true;
 }
 
 void Interpreter::jump(quint32 offset)
@@ -662,7 +729,7 @@ void Interpreter::jumpif(quint16 condition, quint32 offset)
     else if( !( boolean == ObjectMemory2::objectTrue || boolean == ObjectMemory2::objectFalse ) )
     {
         unPop(1);
-        qCritical() << "must be boolean"; // TODO send
+        sendMustBeBoolean();
     }
 }
 
@@ -677,12 +744,13 @@ void Interpreter::sendSelector(Interpreter::OOP selector, quint16 count)
 void Interpreter::sendSelectorToClass(Interpreter::OOP classPointer)
 {
     // original: findNewMethodInClass
-    lookupMethodInClass(classPointer,memory->getRegister(MessageSelector));
+    lookupMethodInClass(classPointer);
     executeNewMethod();
 }
 
 void Interpreter::executeNewMethod()
 {
+    ST_TRACE_METHOD_CALL;
     if( !primitiveResponse() )
         activateNewMethod();
 }
@@ -746,6 +814,7 @@ void Interpreter::transfer(quint32 count, quint16 firstFrom, Interpreter::OOP fr
 
 bool Interpreter::specialSelectorPrimitiveResponse()
 {
+    initPrimitive();
     if( currentBytecode >= 176 && currentBytecode <= 191 )
         arithmeticSelectorPrimitive();
     else if( currentBytecode >= 192 && currentBytecode <= 207 )
@@ -770,6 +839,8 @@ void Interpreter::returnToActiveContext(Interpreter::OOP aContext)
 
 void Interpreter::returnValue(Interpreter::OOP resultPointer, Interpreter::OOP contextPointer)
 {
+    ST_TRACE_BYTECODE(memory->prettyValue(resultPointer).constData() << "from" << memory->prettyValue(contextPointer).constData());
+
     if( contextPointer == ObjectMemory2::objectNil )
     {
         push( memory->getRegister(ActiveContext) );
@@ -810,7 +881,7 @@ qint16 Interpreter::popInteger()
     OOP integerPointer = popStack();
     successUpdate( memory->isIntegerObject(integerPointer) );
     if( success )
-        memory->integerValueOf(integerPointer);
+        return memory->integerValueOf(integerPointer);
     else
         return 0;
 }
@@ -927,57 +998,69 @@ void Interpreter::commonSelectorPrimitive()
         if( success )
             primitiveValue();
         break;
+    default:
+        primitiveFail();
+        break;
     }
-    primitiveFail();
 }
 
 void Interpreter::primitiveAdd()
 {
+    ST_TRACE_PRIMITIVE("");
     _addSubMulImp('+');
 }
 
 void Interpreter::primitiveSubtract()
 {
+    ST_TRACE_PRIMITIVE("");
     _addSubMulImp('-');
 }
 
 void Interpreter::primitiveLessThan()
 {
+    ST_TRACE_PRIMITIVE("");
     _compareImp('<');
 }
 
 void Interpreter::primitiveGreaterThan()
 {
+    ST_TRACE_PRIMITIVE("");
     _compareImp('>');
 }
 
 void Interpreter::primitiveLessOrEqual()
 {
+    ST_TRACE_PRIMITIVE("");
     _compareImp('l');
 }
 
 void Interpreter::primitiveGreaterOrEqual()
 {
+    ST_TRACE_PRIMITIVE("");
     _compareImp('g');
 }
 
 void Interpreter::primitiveEqual()
 {
+    ST_TRACE_PRIMITIVE("");
     _compareImp('=');
 }
 
 void Interpreter::primitiveNotEqual()
 {
+    ST_TRACE_PRIMITIVE("");
     _compareImp('!');
 }
 
 void Interpreter::primitiveMultiply()
 {
+    ST_TRACE_PRIMITIVE("");
     _addSubMulImp('*');
 }
 
 void Interpreter::primitiveDivide()
 {
+    ST_TRACE_PRIMITIVE("");
     const qint16 integerArgument = popInteger();
     const qint16 integerReceiver = popInteger();
     successUpdate( integerArgument != 0 );
@@ -996,6 +1079,7 @@ void Interpreter::primitiveDivide()
 
 void Interpreter::primitiveMod()
 {
+    ST_TRACE_PRIMITIVE("");
     const qint16 integerArgument = popInteger();
     const qint16 integerReceiver = popInteger();
     successUpdate( integerArgument != 0 );
@@ -1013,7 +1097,7 @@ void Interpreter::primitiveMod()
 
 void Interpreter::primitiveMakePoint()
 {
-    enum { XIndex = 0, YIndex = 1, ClassPointSize = 2 };
+    ST_TRACE_PRIMITIVE("");
 
     OOP integerArgument = popStack();
     OOP integerReceiver = popStack();
@@ -1033,6 +1117,7 @@ void Interpreter::primitiveMakePoint()
 
 void Interpreter::primitiveBitShift()
 {
+    ST_TRACE_PRIMITIVE("");
     const qint16 integerArgument = popInteger();
     const qint16 integerReceiver = popInteger();
     successUpdate( integerArgument != 0 );
@@ -1053,6 +1138,7 @@ void Interpreter::primitiveBitShift()
 
 void Interpreter::primitiveDiv()
 {
+    ST_TRACE_PRIMITIVE("");
     const qint16 integerArgument = popInteger();
     const qint16 integerReceiver = popInteger();
     successUpdate( integerArgument != 0 );
@@ -1070,11 +1156,13 @@ void Interpreter::primitiveDiv()
 
 void Interpreter::primitiveBitAnd()
 {
+    ST_TRACE_PRIMITIVE("");
     _bitImp('&');
 }
 
 void Interpreter::primitiveBitOr()
 {
+    ST_TRACE_PRIMITIVE("");
     _bitImp('|');
 }
 
@@ -1099,6 +1187,7 @@ void Interpreter::storeIntegerOfObjectWithValue(quint16 fieldIndex, Interpreter:
 
 void Interpreter::primitiveEquivalent()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP otherObject = popStack();
     OOP thisObject = popStack();
     if( thisObject == otherObject )
@@ -1109,12 +1198,14 @@ void Interpreter::primitiveEquivalent()
 
 void Interpreter::primitiveClass()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP instance = popStack();
     push( memory->fetchClassOf(instance) );
 }
 
 void Interpreter::primitiveBlockCopy()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP blockArgumentCount = popStack();
     OOP context = popStack();
     OOP methodContext = 0;
@@ -1135,6 +1226,7 @@ void Interpreter::primitiveBlockCopy()
 
 void Interpreter::primitiveValue()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP blockContext = stackValue(argumentCount);
     OOP blockArgumentCount = argumentCountOfBlock(blockContext);
     successUpdate( argumentCount == blockArgumentCount );
@@ -1312,7 +1404,9 @@ void Interpreter::dispatchControlPrimitives()
 
 void Interpreter::dispatchInputOutputPrimitives()
 {
-    // TODO
+    // TODO BB p. 648ff
+    ST_TRACE_PRIMITIVE("WARNING: not yet implemented");
+
     switch( primitiveIndex )
     {
     case 90:
@@ -1405,6 +1499,7 @@ void Interpreter::dispatchSystemPrimitives()
 
 void Interpreter::dispatchPrivatePrimitives()
 {
+    ST_TRACE_PRIMITIVE("WARNING: not yet implemented");
     // TODO
 }
 
@@ -1642,6 +1737,7 @@ void Interpreter::pushFloat(float v)
 
 void Interpreter::primitiveAt()
 {
+    ST_TRACE_PRIMITIVE("");
     int index = positive16BitValueOf( popStack() );
     OOP array = popStack();
     OOP arrayClass = memory->fetchClassOf(array);
@@ -1660,6 +1756,7 @@ void Interpreter::primitiveAt()
 
 void Interpreter::primitiveAtPut()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP value = popStack();
     int index = positive16BitValueOf( popStack() );
     OOP array = popStack();
@@ -1678,6 +1775,7 @@ void Interpreter::primitiveAtPut()
 
 void Interpreter::primitiveSize()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP array = popStack();
     OOP cls = memory->fetchClassOf(array);
     OOP length = positive16BitIntegerFor( lengthOf(array) - fixedFieldsOf(cls) );
@@ -1689,6 +1787,7 @@ void Interpreter::primitiveSize()
 
 void Interpreter::primitiveStringAt()
 {
+    ST_TRACE_PRIMITIVE("");
     int index = positive16BitValueOf( popStack() );
     OOP array = popStack();
     checkIndexableBoundsOf(index,array);
@@ -1706,6 +1805,7 @@ void Interpreter::primitiveStringAt()
 
 void Interpreter::primitiveStringAtPut()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP character = popStack();
     int index = positive16BitValueOf( popStack() );
     OOP array = popStack();
@@ -1719,11 +1819,12 @@ void Interpreter::primitiveStringAtPut()
     if( success )
         push(character);
     else
-        unPop(2);
+        unPop(3);
 }
 
 void Interpreter::primitiveNext()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP stream = popStack();
     OOP array = memory->fetchPointerOfObject(StreamArrayIndex,stream);
     OOP arrayClass = memory->fetchClassOf(array);
@@ -1755,6 +1856,7 @@ void Interpreter::primitiveNext()
 
 void Interpreter::primitiveNextPut()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP value = popStack();
     OOP stream = popStack();
     OOP array = memory->fetchPointerOfObject(StreamArrayIndex, stream);
@@ -1785,6 +1887,7 @@ void Interpreter::primitiveNextPut()
 
 void Interpreter::primitiveAtEnd()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP stream = popStack();
     OOP array = memory->fetchPointerOfObject(StreamArrayIndex, stream);
     OOP arrayClass = memory->fetchClassOf(array);
@@ -1861,6 +1964,7 @@ void Interpreter::subscriptWithStoring(Interpreter::OOP array, int index, Interp
 
 void Interpreter::primitiveObjectAt()
 {
+    ST_TRACE_PRIMITIVE("");
     qint16 index = popInteger();
     OOP thisReceiver = popStack();
     successUpdate( index > 0);
@@ -1873,6 +1977,7 @@ void Interpreter::primitiveObjectAt()
 
 void Interpreter::primitiveObjectAtPut()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP newValue = popStack();
     qint16 index = popInteger();
     OOP thisReceiver = popStack();
@@ -1888,6 +1993,7 @@ void Interpreter::primitiveObjectAtPut()
 
 void Interpreter::primitiveNew()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP cls = popStack();
     int size = fixedFieldsOf(cls);
     successUpdate( !isIndexable(cls) );
@@ -1903,6 +2009,7 @@ void Interpreter::primitiveNew()
 
 void Interpreter::primitiveNewWithArg()
 {
+    ST_TRACE_PRIMITIVE("");
     int size = positive16BitValueOf( popStack() );
     OOP cls = popStack();
     successUpdate( isIndexable(cls) );
@@ -1921,6 +2028,7 @@ void Interpreter::primitiveNewWithArg()
 
 void Interpreter::primitiveBecome()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP otherPointer = popStack();
     OOP thisReceiver = popStack();
     successUpdate( !memory->isIntegerObject(otherPointer) );
@@ -1935,6 +2043,7 @@ void Interpreter::primitiveBecome()
 
 void Interpreter::primitiveInstVarAt()
 {
+    ST_TRACE_PRIMITIVE("");
     int index = popInteger();
     OOP thisReceiver = popStack();
     checkInstanceVariableBoundsOf(index,thisReceiver);
@@ -1949,6 +2058,7 @@ void Interpreter::primitiveInstVarAt()
 
 void Interpreter::primitiveInstVarAtPut()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP newValue = popStack();
     int index = popInteger();
     OOP thisReceiver = popStack();
@@ -1963,6 +2073,7 @@ void Interpreter::primitiveInstVarAtPut()
 
 void Interpreter::primitiveAsOop()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP thisReceiver = popStack();
     successUpdate( !memory->isIntegerObject(thisReceiver) );
     if( success )
@@ -1973,6 +2084,7 @@ void Interpreter::primitiveAsOop()
 
 void Interpreter::primitiveAsObject()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP thisReceiver = popStack();
     OOP newOop = thisReceiver & 0xfffe;
     successUpdate( memory->hasObject( newOop ) ); // hasObject is not documented in BB
@@ -1984,6 +2096,7 @@ void Interpreter::primitiveAsObject()
 
 void Interpreter::primitiveSomeInstance()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP cls = popStack();
     OOP next = memory->getNextInstance(cls);
     if( next )
@@ -1994,6 +2107,7 @@ void Interpreter::primitiveSomeInstance()
 
 void Interpreter::primitiveNextInstance()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP object = popStack();
     OOP cls = memory->fetchClassOf(object);
     OOP next = memory->getNextInstance(cls, object);
@@ -2005,6 +2119,7 @@ void Interpreter::primitiveNextInstance()
 
 void Interpreter::primitiveNewMethod()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP header = popStack();
     int bytecodeCount = popInteger();
     OOP cls = popStack();
@@ -2021,6 +2136,7 @@ void Interpreter::checkInstanceVariableBoundsOf(int index, Interpreter::OOP obje
 
 void Interpreter::primitiveValueWithArgs()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP argumentArray = popStack();
     OOP blockContext = popStack();
     OOP blockArgumentCount = argumentCountOfBlock(blockContext);
@@ -2046,10 +2162,11 @@ void Interpreter::primitiveValueWithArgs()
 
 void Interpreter::primitivePerform()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP performSelector = memory->getRegister(MessageSelector);
     memory->setRegister(MessageSelector, stackValue(argumentCount-1));
     OOP newReceiver = stackValue(argumentCount);
-    lookupMethodInClass( memory->fetchClassOf(newReceiver), performSelector ); // BB issue: performSelector missing
+    lookupMethodInClass( memory->fetchClassOf(newReceiver) );
     successUpdate( memory->argumentCountOf( memory->getRegister(NewMethod) ) == argumentCount - 1 );
     if( success )
     {
@@ -2065,11 +2182,12 @@ void Interpreter::primitivePerform()
 
 void Interpreter::primitivePerformWithArgs()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP argumentArray = popStack();
     int arraySize = memory->fetchWordLenghtOf(argumentArray);
     OOP arrayClass = memory->fetchClassOf(argumentArray);
     successUpdate( (stackPointer+arraySize) < memory->fetchWordLenghtOf( memory->getRegister(ActiveContext) ) );
-    successUpdate( arrayClass = ObjectMemory2::classArray );
+    successUpdate( arrayClass == ObjectMemory2::classArray );
     if( success )
     {
         OOP performSelector = memory->getRegister(MessageSelector);
@@ -2082,7 +2200,7 @@ void Interpreter::primitivePerformWithArgs()
             push( memory->fetchPointerOfObject(index-1, argumentArray) );
             index++;
         }
-        lookupMethodInClass( memory->fetchClassOf(thisReceiver), performSelector ); // BB issue: performSelector missing
+        lookupMethodInClass( memory->fetchClassOf(thisReceiver) );
         successUpdate( memory->argumentCountOf( memory->getRegister(NewMethod) ) == argumentCount );
         if( success )
             executeNewMethod();
@@ -2100,11 +2218,14 @@ void Interpreter::primitivePerformWithArgs()
 
 void Interpreter::primitiveSignal()
 {
-    synchronousSignal( stackTop() );
+    OOP top = stackTop();
+    ST_TRACE_PRIMITIVE("stackTop" << memory->prettyValue(top).constData());
+    synchronousSignal( top );
 }
 
 void Interpreter::primitiveWait()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP thisReceiver = stackTop();
     int excessSignals = fetchIntegerOfObject( ExcessSignalIndex, thisReceiver );
     if( excessSignals > 0 )
@@ -2118,11 +2239,13 @@ void Interpreter::primitiveWait()
 
 void Interpreter::primitiveResume()
 {
+    ST_TRACE_PRIMITIVE("");
     resume( stackTop() );
 }
 
 void Interpreter::primitiveSuspend()
 {
+    ST_TRACE_PRIMITIVE("");
     successUpdate( stackTop() == activeProcess() );
     if( success )
     {
@@ -2134,6 +2257,7 @@ void Interpreter::primitiveSuspend()
 
 void Interpreter::primitiveFlushCache()
 {
+    ST_TRACE_PRIMITIVE("");
     // initializeMethodCache();
     // we don't have that
 }
@@ -2262,8 +2386,38 @@ void Interpreter::primitiveQuit()
     Display::inst()->close();
 }
 
+void Interpreter::createActualMessage()
+{
+    OOP argumentArray = memory->instantiateClassWithPointers( ObjectMemory2::classArray, argumentCount );
+    OOP message = memory->instantiateClassWithPointers( ObjectMemory2::classMessage, MessageSize );
+    memory->storePointerOfObject( MessageSelectorIndex, message, memory->getRegister(MessageSelector) );
+    memory->storePointerOfObject( MessageArgumentsIndex, message, argumentArray );
+    transfer( argumentCount, stackPointer - (argumentCount - 1 ), memory->getRegister(ActiveContext), 0, argumentArray );
+    pop( argumentCount );
+    push( message );
+    argumentCount = 1;
+}
+
+void Interpreter::sendMustBeBoolean()
+{
+    sendSelector( ObjectMemory2::symbolMustBeBoolean, 0 );
+}
+
+QByteArray Interpreter::prettyArgs_()
+{
+    QByteArray res;
+    for( int i = 0; i < argumentCount; i++ )
+    {
+        if( i != 0 )
+            res += " ";
+        res += memory->prettyValue( stackValue(argumentCount- (i+1) ) );
+    }
+    return res;
+}
+
 void Interpreter::primitiveQuo()
 {
+    ST_TRACE_PRIMITIVE("");
     const double integerArgument = popInteger();
     const double integerReceiver = popInteger();
     successUpdate( integerArgument != 0 );
@@ -2281,6 +2435,7 @@ void Interpreter::primitiveQuo()
 
 void Interpreter::primitiveBitXor()
 {
+    ST_TRACE_PRIMITIVE("");
     _bitImp('^');
 }
 
@@ -2344,6 +2499,7 @@ void Interpreter::_bitImp(char op)
 
 void Interpreter::primitiveAsFloat()
 {
+    ST_TRACE_PRIMITIVE("");
     const qint16 integerReceiver = popInteger();
     if( success )
         pushFloat(integerReceiver);
@@ -2353,59 +2509,70 @@ void Interpreter::primitiveAsFloat()
 
 void Interpreter::primitiveFloatAdd()
 {
+    ST_TRACE_PRIMITIVE("");
     _floatOpImp('+');
 }
 
 void Interpreter::primitiveFloatSubtract()
 {
+    ST_TRACE_PRIMITIVE("");
     _floatOpImp('-');
 }
 
 void Interpreter::primitiveFloatLessThan()
 {
+    ST_TRACE_PRIMITIVE("");
     _floatCompImp('<');
 }
 
 void Interpreter::primitiveFloatGreaterThan()
 {
+    ST_TRACE_PRIMITIVE("");
     _floatCompImp('>');
 }
 
 void Interpreter::primitiveFloatLessOrEqual()
 {
+    ST_TRACE_PRIMITIVE("");
     _floatCompImp('l');
 }
 
 void Interpreter::primitiveFloatGreaterOrEqual()
 {
+    ST_TRACE_PRIMITIVE("");
     _floatCompImp('g');
 }
 
 void Interpreter::primitiveFloatEqual()
 {
+    ST_TRACE_PRIMITIVE("");
     _floatCompImp('=');
 }
 
 void Interpreter::primitiveFloatNotEqual()
 {
+    ST_TRACE_PRIMITIVE("");
     _floatCompImp('!');
 }
 
 void Interpreter::primitiveFloatMultiply()
 {
+    ST_TRACE_PRIMITIVE("");
     _floatOpImp('*');
 }
 
 void Interpreter::primitiveFloatDivide()
 {
+    ST_TRACE_PRIMITIVE("");
     _floatOpImp('/');
 }
 
 void Interpreter::primitiveTruncated()
 {
+    ST_TRACE_PRIMITIVE("");
     const float floatReceiver = popFloat();
     const qint32 res = floatReceiver;
-    successUpdate( res & 0x7fff8000 == 0 );
+    successUpdate( ( res & 0x7fff8000 ) == 0 );
     if( success )
         pushInteger(res);
     else
@@ -2415,19 +2582,19 @@ void Interpreter::primitiveTruncated()
 
 void Interpreter::primitiveFractionalPart()
 {
-    qWarning() << "primitiveFractionalPart not implemented";
+    ST_TRACE_PRIMITIVE("WARNING: not yet implemented");
     primitiveFail(); // TODO
 }
 
 void Interpreter::primitiveExponent()
 {
-    qWarning() << "primitiveExponent not implemented";
+    ST_TRACE_PRIMITIVE("WARNING: not yet implemented");
     primitiveFail(); // TODO
 }
 
 void Interpreter::primitiveTimesTwoPower()
 {
-    qWarning() << "primitiveTimesTwoPower not implemented";
+    ST_TRACE_PRIMITIVE("WARNING: not yet implemented");
     primitiveFail(); // TODO
 }
 

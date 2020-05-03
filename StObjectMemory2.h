@@ -117,6 +117,7 @@ namespace St
         void addTemp(OOP oop);
         void removeTemp(OOP oop);
         OOP getNextInstance( OOP cls, OOP cur = 0 ) const;
+        QByteArray prettyValue( OOP oop ) const;
 
         // oop 0 is reserved as an invalid object pointer!
 
@@ -131,6 +132,7 @@ namespace St
         quint16 fetchByteLenghtOf( OOP objectPointer ) const;
         quint16 fetchWordLenghtOf( OOP objectPointer ) const;
         ByteString fetchByteString( OOP objectPointer ) const;
+        QByteArray fetchByteArray(OOP objectPointer , bool rawData = false) const;
         float fetchFloat( OOP objectPointer ) const;
         void storeFloat( OOP objectPointer, float v );
         void swapPointersOf( OOP firstPointer, OOP secondPointer );
@@ -164,7 +166,7 @@ namespace St
 
     protected:
         int findFreeSlot();
-        OOP instantiateClass( OOP cls, quint16 wordLen, bool isPtr );
+        OOP instantiateClass( OOP cls, quint16 byteLen, bool isPtr );
         void mark(OOP);
 
     private:

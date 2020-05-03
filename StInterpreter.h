@@ -30,16 +30,23 @@ namespace St
     {
     public:
         typedef quint16 OOP;
-        enum MethodContext { SenderIndex = 0, InstructionPointerIndex = 1,
+        enum MethodContext { SenderIndex = 0, // BB: The suspended context is called the new context's sender
+                             InstructionPointerIndex = 1,
                              StackPointerIndex = 2, MethodIndex = 3, ReceiverIndex = 5,
                            TempFrameStart = 6 };
-        enum BlockContext { CallerIndex = 0, BlockArgumentCountIndex = 3, InitialIPIndex = 4,
-                            HomeIndex = 5 };
+        enum BlockContext { CallerIndex = 0, BlockArgumentCountIndex = 3, InitialIPIndex = 4, HomeIndex = 5 };
+
         enum Registers { ActiveContext, HomeContext, Method, Receiver, MessageSelector, NewMethod, NewProcess };
+
+        enum MessageIndices {
+            MessageSelectorIndex = 0,
+            MessageArgumentsIndex = 1,
+            MessageSize = 2
+        };
 
         enum ClassIndizes {
             SuperClassIndex = 0,
-            MessageDictIndex = 1,
+            MessageDictionaryIndex = 1,
             InstanceSpecIndex = 2,
         };
 
@@ -74,6 +81,10 @@ namespace St
             MyListIndex = 3
         };
 
+        enum Point {
+            XIndex = 0, YIndex = 1, ClassPointSize = 2
+        };
+
         Interpreter(QObject* p = 0);
         void setOm( ObjectMemory2* om );
         void interpret();
@@ -98,8 +109,8 @@ namespace St
         OOP caller();
         OOP temporary( qint16 offset );
         OOP literal(qint16 offset);
-        OOP lookupMethodInDictionary(OOP dictionary, OOP selector);
-        OOP lookupMethodInClass(OOP cls, OOP selector);
+        bool lookupMethodInDictionary(OOP dictionary);
+        bool lookupMethodInClass(OOP cls);
         OOP superclassOf(OOP cls);
         OOP instanceSpecificationOf( OOP cls );
         bool isPointers( OOP cls );
@@ -122,9 +133,9 @@ namespace St
         bool pushReceiverBytecode();
         bool pushConstantBytecode();
         bool extendedPushBytecode();
-        bool extendedStoreBytecode();
+        bool extendedStoreBytecode(bool subcall);
         bool extendedStoreAndPopBytecode();
-        bool popStackBytecode();
+        bool popStackBytecode(bool subcall);
         bool duplicateTopBytecode();
         bool pushActiveContextBytecode();
         bool shortUnconditionalJump();
@@ -265,10 +276,14 @@ namespace St
         void resume(OOP aProcess);
         void suspendActive();
         void primitiveQuit();
+        void createActualMessage();
+        void sendMustBeBoolean();
+        QByteArray prettyArgs_();
     private:
         ObjectMemory2* memory;
         qint16 stackPointer, instructionPointer, argumentCount, primitiveIndex, semaphoreIndex;
         QList<OOP> semaphoreList;
+        quint32 cycleNr;
         quint8 currentBytecode;
         bool d_run, success, newProcessWaiting;
     };

@@ -271,6 +271,68 @@ ObjectMemory2::OOP ObjectMemory2::getNextInstance(ObjectMemory2::OOP cls, Object
     return 0;
 }
 
+QByteArray ObjectMemory2::prettyValue(ObjectMemory2::OOP oop) const
+{
+    switch( oop )
+    {
+    case objectNil:
+        return "nil";
+    case objectFalse:
+        return "false";
+    case objectTrue:
+        return "true";
+    case processor:
+        return "processor";
+    case smalltalk:
+        return "smalltalk";
+    case symbolTable:
+        return "symbolTable";
+    case symbolDoesNotUnderstand:
+        return "symbolDoesNotUnderstand";
+    case symbolCannotReturn:
+        return "symbolCannotReturn";
+    case symbolMonitor:
+        return "symbolMonitor";
+    case symbolUnusedOop18:
+        return "symbolUnusedOop18";
+    case symbolMustBeBoolean:
+        return "symbolMustBeBoolean";
+    case specialSelectors:
+        return "specialSelectors";
+    case characterTable:
+        return "characterTable";
+    }
+    OOP cls = fetchClassOf(oop);
+    switch( cls )
+    {
+    case classSmallInteger:
+        return QByteArray::number( integerValueOf(oop) );
+    case classString:
+        return "\"" + fetchByteArray(oop) + "\"";
+    case classFloat:
+        return QByteArray::number( fetchFloat(oop) );
+    case classPoint:
+        {
+            OOP x = fetchPointerOfObject( 0, oop );
+            OOP y = fetchPointerOfObject( 1, oop );
+            return prettyValue(x) + "@" + prettyValue(y);
+        }
+    case classCharacter:
+        {
+            quint16 ch = fetchWordOfObject(0,oop);
+            ch = ch >> 1;
+            if( ::isprint(ch) )
+                return "'" + QByteArray(1,ch) + "'";
+            else
+                return "0x" + QByteArray::number(ch,16);
+
+        }
+    case classSymbol:
+        return "#" + fetchByteArray(oop);
+    }
+    return "<a " + fetchClassName(cls) + ">";
+}
+
 bool ObjectMemory2::hasPointerMembers(OOP objectPointer) const
 {
     if( isInt(objectPointer) )
@@ -291,7 +353,7 @@ void ObjectMemory2::storePointerOfObject(quint16 fieldIndex, OOP objectPointer, 
 {
     const OtSlot& s = getSlot(objectPointer);
     const quint32 off = fieldIndex * 2;
-    Q_ASSERT( ( off + 1 ) < s.byteLen() && !isInt(withValue) );
+    Q_ASSERT( ( off + 1 ) < s.byteLen() );
     writeU16( s.d_obj->d_data, off, withValue );
 }
 
@@ -353,20 +415,17 @@ quint16 ObjectMemory2::fetchWordLenghtOf(OOP objectPointer) const
 
 ObjectMemory2::OOP ObjectMemory2::instantiateClassWithPointers(OOP classPointer, quint16 instanceSize)
 {
-    // TODO
-    return 0;
+    return instantiateClass( classPointer, instanceSize << 1, true );
 }
 
 ObjectMemory2::OOP ObjectMemory2::instantiateClassWithWords(OOP classPointer, quint16 instanceSize)
 {
-    // TODO
-    return 0;
+    return instantiateClass( classPointer, instanceSize << 1, false );
 }
 
 ObjectMemory2::OOP ObjectMemory2::instantiateClassWithBytes(OOP classPointer, quint16 instanceByteSize)
 {
-    // TODO
-    return 0;
+    return instantiateClass( classPointer, instanceByteSize, false );
 }
 
 ObjectMemory2::ByteString ObjectMemory2::fetchByteString(OOP objectPointer) const
@@ -375,6 +434,19 @@ ObjectMemory2::ByteString ObjectMemory2::fetchByteString(OOP objectPointer) cons
         return ByteString(0,0);
     const OtSlot& s = getSlot(objectPointer);
     return ByteString( s.d_obj->d_data, s.byteLen() );
+}
+
+QByteArray ObjectMemory2::fetchByteArray(ObjectMemory2::OOP objectPointer, bool rawData ) const
+{
+    ByteString bs = fetchByteString(objectPointer);
+    if( bs.d_bytes )
+    {
+        if( rawData )
+            return QByteArray::fromRawData( (const char*)bs.d_bytes, bs.d_len );
+        else
+            return (const char*)bs.d_bytes;
+    }else
+        return QByteArray();
 }
 
 float ObjectMemory2::fetchFloat(ObjectMemory2::OOP objectPointer) const
@@ -595,7 +667,9 @@ ObjectMemory2::OOP ObjectMemory2::integerObjectOf(qint16 value)
 
 bool ObjectMemory2::isIntegerValue(int valueWord)
 {
-    return valueWord <= -16834 && valueWord > 16834;
+    // BB description: Return true if value can be represented as an instance of SmallInteger, false if not
+    // BB states "valueWord <= -16834 && valueWord > 16834;" which contradicts to the description
+    return valueWord >= -16834 && valueWord < 16834;
 }
 
 int ObjectMemory2::findFreeSlot()
@@ -609,18 +683,20 @@ int ObjectMemory2::findFreeSlot()
     return -1;
 }
 
-ObjectMemory2::OOP ObjectMemory2::instantiateClass(ObjectMemory2::OOP cls, quint16 wordLen, bool isPtr)
+ObjectMemory2::OOP ObjectMemory2::instantiateClass(ObjectMemory2::OOP cls, quint16 byteLen, bool isPtr)
 {
     int slot = findFreeSlot();
     if( slot < 0 )
+    {
         collectGarbage();
-    slot = findFreeSlot();
+        slot = findFreeSlot();
+    }
     if( slot < 0 )
     {
         qCritical() << "cannot allocate object, no free object table slots";
         return 0;
     }
-    if( d_ot.allocate( slot, wordLen >> 1, cls, isPtr ) )
+    if( d_ot.allocate( slot, byteLen, cls, isPtr ) == 0 )
     {
         qCritical() << "cannot allocate object, no free memory";
         return 0;
