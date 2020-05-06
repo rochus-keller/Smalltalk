@@ -22,6 +22,7 @@
 
 #include <QWidget>
 
+
 namespace St
 {
     class Display : public QWidget
@@ -31,6 +32,14 @@ namespace St
         explicit Display(QWidget *parent = 0);
         static Display* inst();
 
+        void setBuffer( const quint8*, quint16 width, quint16 height );
+    protected:
+        void paintEvent(QPaintEvent *);
+        void timerEvent(QTimerEvent *);
+
+    private:
+        quint16 d_width, d_height;
+        const quint8* d_buf;
     };
 }
 

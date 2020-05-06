@@ -30,7 +30,6 @@ VirtualMachine::VirtualMachine(QObject* parent) : QObject(parent)
 {
     d_om = new ObjectMemory2(this);
     d_ip = new Interpreter(this);
-    d_ip->setOm(d_om);
 }
 
 void VirtualMachine::run(const QString& path)
@@ -48,6 +47,7 @@ void VirtualMachine::run(const QString& path)
         return;
     }
 
+    d_ip->setOm(d_om);
     d_ip->interpret();
 }
 

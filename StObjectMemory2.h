@@ -52,7 +52,7 @@ namespace St
             smalltalk = 0x12, // an Association whose value field is SystemDirectory
 
             // classes
-            classSmallInteger = 0x0c,
+            classSmallInteger = 0x0c, // max 16383 (16384), min -16384 (-16385), bits 14, bytes 2
             classString = 0x0e,
             classArray = 0x10,
             classFloat = 0x14,
@@ -163,6 +163,7 @@ namespace St
         static qint16 integerValueOf(OOP objectPointer );
         static OOP integerObjectOf(qint16 value );
         static bool isIntegerValue(int);
+        int largeIntegerValueOf(OOP integerPointer) const;
 
     protected:
         int findFreeSlot();
@@ -187,14 +188,14 @@ namespace St
             OtSlot():d_obj(0),d_size(0),d_isOdd(0),d_class(0),d_isPtr(0) {}
             bool isFree() const { return d_obj == 0; }
             OOP getClass() const { return d_class << 1; }
-            quint32 byteLen() const { return d_size << 1; }
+            quint32 byteLen() const { return ( d_size << 1 ) - ( d_isOdd ? 1 : 0 ); }
         };
 
         struct ObjectTable
         {
             QVector<OtSlot> d_slots;
             ObjectTable():d_slots( 0xffff >> 1 ) {}
-            Object* allocate(quint16 slot, quint16 numOfBytes, OOP cls, bool isPtr );
+            OtSlot* allocate(quint16 slot, quint16 numOfBytes, OOP cls, bool isPtr );
             void free( quint16 slot );
         };
 

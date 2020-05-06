@@ -143,8 +143,10 @@ bool ObjectMemory2::readFrom(QIODevice* in)
 
         const OOP oop = i >> 2;
 
-        Object* obj = d_ot.allocate( oop, byteLen, cls, isPtr(flags) );
-        ::memcpy( obj->d_data, objectSpace.constData() + addr + 4, byteLen ); // without header
+        OtSlot* slot = d_ot.allocate( oop, byteLen, cls, isPtr(flags) );
+        Q_ASSERT( slot != 0 );
+        slot->d_isOdd = isOdd(flags);
+        ::memcpy( slot->d_obj->d_data, objectSpace.constData() + addr + 4, byteLen ); // without header
     }
 
     d_objects.clear();
@@ -307,6 +309,8 @@ QByteArray ObjectMemory2::prettyValue(ObjectMemory2::OOP oop) const
     {
     case classSmallInteger:
         return QByteArray::number( integerValueOf(oop) );
+    case classLargePositiveInteger:
+        return QByteArray::number( largeIntegerValueOf(oop) ) + "L";
     case classString:
         return "\"" + fetchByteArray(oop) + "\"";
     case classFloat:
@@ -640,13 +644,13 @@ qint16 ObjectMemory2::integerValueOf(OOP objectPointer)
 {
     if( isInt(objectPointer) )
     {
-        int res = ( objectPointer >> 1 );
-        if( objectPointer & 0x4000 )
+        quint16 tcomp = ( objectPointer >> 1 );
+        if( tcomp & 0x4000 )
         {
-            res = -( ~res & 0x7fff ) - 1;
+            qint16 res = -( ~tcomp & 0x7fff ) - 1;
             return res;
         }else
-            return res;
+            return tcomp;
     }else
         return 0;
 }
@@ -668,8 +672,44 @@ ObjectMemory2::OOP ObjectMemory2::integerObjectOf(qint16 value)
 bool ObjectMemory2::isIntegerValue(int valueWord)
 {
     // BB description: Return true if value can be represented as an instance of SmallInteger, false if not
-    // BB states "valueWord <= -16834 && valueWord > 16834;" which contradicts to the description
+    // BB states "valueWord <= -16834 && valueWord > 16834;" which contradicts with the description
     return valueWord >= -16834 && valueWord < 16834;
+}
+
+int ObjectMemory2::largeIntegerValueOf(OOP integerPointer) const
+{
+    // TODO: LargePositiveInteger can have 4 bytes
+    // Examples in VirtualImage:
+    // z.B. SecondsInDay ← 24 * 60 * 60 = 86'400 -> 0x80510100
+    // z.B. ExternalStream.nextSignedInteger 2fa4 0x00000100 -> 65'536
+    // also 6532, 65a0
+    // z.B. Benchmark.testLargeIntArith 67c8 0x80380100 -> 80'000
+    // z.B. WordsLeftLimit 923e 0x86730200
+    // BB: this is an undocumented feature of LargePositiveInteger
+    // see also Object.asOop and LargePositiveInteger.asObject
+
+    if( isIntegerObject(integerPointer) )
+        return integerValueOf(integerPointer);
+    Q_ASSERT( fetchClassOf(integerPointer) == classLargePositiveInteger );
+    int value = 0;
+    int len = fetchByteLenghtOf(integerPointer);
+    if( len == 2 )
+    {
+        value = fetchByteOfObject(1, integerPointer) << 8;
+        value += fetchByteOfObject(0, integerPointer);
+    }else if( len == 3 )
+    {
+        // empirically found from examples
+        value = fetchByteOfObject(0, integerPointer);
+        value += fetchByteOfObject(1, integerPointer) << 8;
+        value += fetchByteOfObject(2, integerPointer) * 65536;
+    }else if( len == 4 )
+    {
+        // TODO
+        value = 99999999;
+    }else
+        Q_ASSERT( false );
+    return value;
 }
 
 int ObjectMemory2::findFreeSlot()
@@ -784,7 +824,7 @@ const ObjectMemory2::OtSlot&ObjectMemory2::getSlot(ObjectMemory2::OOP oop) const
     return d_ot.d_slots[i];
 }
 
-ObjectMemory2::Object* ObjectMemory2::ObjectTable::allocate(quint16 slot, quint16 numOfBytes, OOP cls, bool isPtr)
+ObjectMemory2::OtSlot* ObjectMemory2::ObjectTable::allocate(quint16 slot, quint16 numOfBytes, OOP cls, bool isPtr)
 {
     Q_ASSERT( slot < d_slots.size() && d_slots[slot].d_obj == 0 );
     bool isOdd = false;
@@ -804,7 +844,7 @@ ObjectMemory2::Object* ObjectMemory2::ObjectTable::allocate(quint16 slot, quint1
     ots.d_isPtr = isPtr;
     ots.d_class = cls >> 1;
     ots.d_size = numOfBytes >> 1;
-    return ots.d_obj;
+    return &ots;
 }
 
 void ObjectMemory2::ObjectTable::free(quint16 slot)

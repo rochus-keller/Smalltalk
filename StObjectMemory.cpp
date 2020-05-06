@@ -234,7 +234,7 @@ quint8 ObjectMemory::fetchByteOfObject(quint16 byteIndex, quint16 objectPointer)
 {
     Data data = getDataOf( objectPointer );
     const quint32 off = byteIndex;
-    Q_ASSERT( !data.d_isPtr && off < data.d_len );
+    Q_ASSERT( !data.d_isPtr && off < data.getLen() );
     return (quint8)d_objectSpace[data.d_pos + off];
 }
 
@@ -242,7 +242,7 @@ void ObjectMemory::storeByteOfObject(quint16 byteIndex, quint16 objectPointer, q
 {
     Data data = getDataOf( objectPointer );
     const quint32 off = byteIndex;
-    Q_ASSERT( !data.d_isPtr && off < data.d_len );
+    Q_ASSERT( !data.d_isPtr && off < data.getLen() );
     d_objectSpace[data.d_pos + off] = withValue;
 }
 
@@ -259,7 +259,7 @@ quint16 ObjectMemory::fetchByteLenghtOf(quint16 objectPointer) const
     if( isInt(objectPointer) )
         return 0;
     Data data = getDataOf( objectPointer );
-    return data.d_len;
+    return data.getLen();
 }
 
 quint16 ObjectMemory::fetchWordLenghtOf(quint16 objectPointer) const
@@ -290,7 +290,7 @@ ObjectMemory::ByteString ObjectMemory::fetchByteString(quint16 objectPointer) co
     if( isInt(objectPointer) )
         return ByteString(0,0);
     Data d = getDataOf( objectPointer );
-    return ByteString( (quint8*) d_objectSpace.constData() + d.d_pos, d.d_len );
+    return ByteString( (quint8*) d_objectSpace.constData() + d.d_pos, d.getLen() );
 }
 
 float ObjectMemory::fetchFloat(quint16 objectPointer) const
@@ -363,7 +363,7 @@ ObjectMemory::ByteString ObjectMemory::methodBytecodes(quint16 methodPointer) co
     Q_ASSERT( isCompiledMethod(d_objectSpace,d.d_pos) );
     const quint8 literalByteCount = getLiteralByteCount(d_objectSpace, d.d_pos );
     const quint8* bytes = (quint8*) d_objectSpace.constData() + d.d_pos + methHdrByteLen + literalByteCount;
-    const quint16 byteLen = d.d_len - ( methHdrByteLen + literalByteCount );
+    const quint16 byteLen = d.getLen() - ( methHdrByteLen + literalByteCount );
     return ByteString( bytes, byteLen );
 }
 
@@ -557,6 +557,7 @@ ObjectMemory::Data ObjectMemory::getDataOf(quint16 oop, bool noHeader ) const
     Data res;
     res.d_pos = getSpaceAddr(oop, &odd, &ptr );
     res.d_isPtr = ptr;
+    res.d_isOdd = odd;
     res.d_len = readU16( d_objectSpace, res.d_pos ) * 2;
     //if( odd ) // no because the data is there anyway
     //    res.d_len--;

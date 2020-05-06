@@ -23,29 +23,82 @@
 #include <QApplication>
 using namespace St;
 
+#define ST_DO_TRACING
+#define ST_DO_TRACE2
+
+#ifdef ST_DO_TRACING
+#ifdef ST_DO_TRACE2
 #define ST_TRACE_BYTECODE(msg) qDebug() << "Bytecode" << ( "<" + QByteArray::number(currentBytecode) + ">" ).constData() \
     << __FUNCTION__ << msg;
 #define ST_TRACE_PRIMITIVE(msg) qDebug() << "Primitive" << ( "#" + QByteArray::number(primitiveIndex)  ).constData() \
     << __FUNCTION__ << msg;
 #define ST_TRACE_METHOD_CALL qDebug() << ( "[cycle=" + QByteArray::number(cycleNr) + "]" ).constData() << \
     memory->prettyValue(stackValue(argumentCount) ).constData() << \
+    QByteArray::number(memory->getRegister(NewMethod),16).constData() << \
     memory->fetchByteArray(memory->getRegister(MessageSelector)).constData() << prettyArgs_().constData();
+#define ST_RETURN_BYTECODE(msg) ST_TRACE_BYTECODE(msg)
+#else
+#define ST_TRACE_METHOD_CALL qDebug() << QByteArray(level,'\t').constData() << \
+    ( "[cycle=" + QByteArray::number(cycleNr) + "]" ).constData() << \
+    memory->prettyValue(stackValue(argumentCount) ).constData() << \
+    QByteArray::number(memory->getRegister(NewMethod),16).constData() << \
+    memory->fetchByteArray(memory->getRegister(MessageSelector)).constData() << prettyArgs_().constData();
+#define ST_RETURN_BYTECODE(msg) qDebug() << QByteArray(level,'\t').constData() << \
+    "^" << ( "<" + QByteArray::number(currentBytecode) + ">" ).constData() << msg;
+#define ST_TRACE_BYTECODE(msg)
+#define ST_TRACE_PRIMITIVE(msg)
+#endif
+#else
+#define ST_TRACE_BYTECODE(msg)
+#define ST_TRACE_PRIMITIVE(msg)
+#define ST_TRACE_METHOD_CALL
+#define ST_RETURN_BYTECODE(msg)
+#endif
 
 Interpreter::Interpreter(QObject* p):QObject(p),memory(0),stackPointer(0),instructionPointer(0),d_run(false),
-    semaphoreIndex(0), newProcessWaiting(false),cycleNr(0)
+    semaphoreIndex(0), newProcessWaiting(false),cycleNr(0), level(0)
 {
 
+}
+
+static ObjectMemory2::OOP findDisplay(ObjectMemory2* memory)
+{
+    ObjectMemory2::OOP sysdict = memory->fetchPointerOfObject(1, ObjectMemory2::smalltalk );
+    for( int i = 1; i < memory->fetchWordLenghtOf( sysdict ); i++ )
+    {
+        ObjectMemory2::OOP assoc = memory->fetchPointerOfObject(i,sysdict);
+        if( assoc != ObjectMemory2::objectNil )
+        {
+            ObjectMemory2::OOP sym = memory->fetchPointerOfObject(0,assoc);
+            QByteArray name = memory->fetchByteArray(sym);
+            if( name == "Display" )
+                return memory->fetchPointerOfObject(1,assoc);
+        }
+    }
+    return 0;
 }
 
 void Interpreter::setOm(ObjectMemory2* om)
 {
     memory = om;
+
+    if( om )
+    {
+        const OOP display = findDisplay(memory); // 0x340;
+        OOP bitmap = memory->fetchWordOfObject(0,display);
+        quint16 width = memory->integerValueOf(memory->fetchWordOfObject(1,display));
+        quint16 height = memory->integerValueOf(memory->fetchWordOfObject(2,display));
+        Q_ASSERT( memory->fetchByteLenghtOf(bitmap) == width * height / 8 );
+        Display::inst()->setBuffer(memory->fetchByteString(bitmap).d_bytes,width,height);
+    }else
+        Display::inst()->setBuffer(0,0,0);
 }
 
 void Interpreter::interpret()
 {
     d_run = true;
     cycleNr = 0;
+    level = 0;
     newActiveContext( firstContext() ); // BB: When Smalltalk is started up, ...
     //OOP method = memory->getRegister(Method);
     //QPair<OOP,OOP> selector = memory->findSelectorAndOwningClassOf(method);
@@ -55,7 +108,7 @@ void Interpreter::interpret()
     //     ->quit->saveAs:thenQuit:->snapshotAs:thenQuit:
     // top: BlockContext->newProcess, ControllManager->activeController:
 
-    while( d_run && cycleNr < 500 ) // TEST
+    while( d_run ) // && cycleNr < 2000 ) // TEST trace2 < 500 trace3 < 2000
     {
         cycle();
         qApp->processEvents();
@@ -299,7 +352,7 @@ void Interpreter::dispatchOnThisBytecode()
     else if( b >= 144 && b <= 175 )
         jumpBytecode();
     else if( b >= 138 && b <= 143 )
-        qWarning() << "hit unused bytecode" << b;
+        qWarning() << "WARNING: hit unused bytecode" << b;
 }
 
 bool Interpreter::stackBytecode()
@@ -362,7 +415,7 @@ bool Interpreter::returnBytecode()
         break;
     // unused
     default:
-        qWarning() << "executing unused bytecode" << currentBytecode;
+        qWarning() << "WARNING: executing unused bytecode" << currentBytecode;
         return false;
     }
     return true;
@@ -408,7 +461,7 @@ bool Interpreter::pushTemporaryVariableBytecode()
 {
     int var = currentBytecode & 0xf;
     OOP val = temporary( var );
-    ST_TRACE_BYTECODE( "variable" << var << "value" << memory->prettyValue(val) );
+    ST_TRACE_BYTECODE( "variable" << var << "value" << memory->prettyValue(val).constData() );
     // "Push Temporary Location #%1").arg( b & 0xf ), 1 );
     push( val );
     return true;
@@ -417,7 +470,8 @@ bool Interpreter::pushTemporaryVariableBytecode()
 bool Interpreter::pushLiteralConstantBytecode()
 {
     OOP lit = literal( currentBytecode & 0x1f );
-    ST_TRACE_BYTECODE( "literal" << (currentBytecode & 0x1f) << memory->prettyValue(lit).constData() );
+    ST_TRACE_BYTECODE( "literal" << (currentBytecode & 0x1f) << "value" << memory->prettyValue(lit).constData() <<
+                       "of method" << QByteArray::number( memory->getRegister(Method), 16 ).constData() );
     // "Push Literal Constant #%1").arg( b & 0x1f ), 1 );
     push( lit );
     return true;
@@ -427,9 +481,10 @@ static const quint16 ValueIndex = 1;
 
 bool Interpreter::pushLiteralVariableBytecode()
 {
-    ST_TRACE_BYTECODE("");
+    OOP assoc = literal( currentBytecode & 0x1f );
+    ST_TRACE_BYTECODE("literal" << (currentBytecode & 0x1f) << "value" << memory->prettyValue(assoc).constData() <<
+                      "of method" << QByteArray::number( memory->getRegister(Method), 16 ).constData());
     // "Push Literal Variable #%1").arg( b & 0x1f ), 1 );
-    quint16 assoc = literal( currentBytecode & 0x1f );
     push( memory->fetchPointerOfObject( ValueIndex, assoc ) );
     return true;
 }
@@ -780,6 +835,7 @@ bool Interpreter::primitiveResponse()
 
 void Interpreter::activateNewMethod()
 {
+    level++;
     quint16 contextSize = TempFrameStart;
     OOP newMethod = memory->getRegister(NewMethod);
     if( memory->largeContextFlagOf( newMethod ) )
@@ -839,18 +895,25 @@ void Interpreter::returnToActiveContext(Interpreter::OOP aContext)
 
 void Interpreter::returnValue(Interpreter::OOP resultPointer, Interpreter::OOP contextPointer)
 {
-    ST_TRACE_BYTECODE(memory->prettyValue(resultPointer).constData() << "from" << memory->prettyValue(contextPointer).constData());
+    OOP active = memory->getRegister(ActiveContext);
+    ST_RETURN_BYTECODE(memory->prettyValue(resultPointer).constData() << "from" <<
+                       memory->prettyValue(active).constData());
+
+#ifdef ST_DO_TRACING
+    if( memory->fetchClassOf(active) != ObjectMemory2::classBlockContext )
+        level--;
+#endif
 
     if( contextPointer == ObjectMemory2::objectNil )
     {
-        push( memory->getRegister(ActiveContext) );
+        push( active );
         push( resultPointer );
         sendSelector(ObjectMemory2::symbolCannotReturn, 1 );
     }
     OOP sendersIP = memory->fetchPointerOfObject( InstructionPointerIndex, contextPointer );
     if( sendersIP == ObjectMemory2::objectNil )
     {
-        push( memory->getRegister(ActiveContext) );
+        push( active );
         push( resultPointer );
         sendSelector(ObjectMemory2::symbolCannotReturn, 1 );
     }
@@ -898,6 +961,7 @@ Interpreter::OOP Interpreter::positive16BitIntegerFor(int integerValue)
     if( memory->isIntegerValue(integerValue) )
         return memory->integerObjectOf(integerValue);
     OOP newLargeInteger = memory->instantiateClassWithBytes(ObjectMemory2::classLargePositiveInteger, 2);
+    Q_ASSERT( memory->fetchByteLenghtOf( newLargeInteger ) == 2 );
     memory->storeByteOfObject( 0, newLargeInteger, integerValue & 0xff );
     memory->storeByteOfObject( 1, newLargeInteger, ( integerValue >> 8 ) & 0xff );
     return newLargeInteger;
@@ -911,8 +975,8 @@ int Interpreter::positive16BitValueOf(Interpreter::OOP integerPointer)
         return primitiveFail();
     if( memory->fetchByteLenghtOf(integerPointer) != 2 )
         return primitiveFail();
-    int value = memory->fetchByteOfObject(integerPointer,1) << 8;
-    value += memory->fetchByteOfObject(integerPointer,0);
+    int value = memory->fetchByteOfObject(1, integerPointer) << 8;
+    value += memory->fetchByteOfObject(0, integerPointer);
     return value;
 }
 
@@ -1247,7 +1311,9 @@ void Interpreter::quickInstanceLoad()
 {
     OOP thisReceiver = popStack();
     quint16 fieldIndex = memory->fieldIndexOf( memory->getRegister(NewMethod) );
-    push( memory->fetchPointerOfObject( fieldIndex, thisReceiver ) );
+    OOP val = memory->fetchPointerOfObject( fieldIndex, thisReceiver );
+    // qDebug() << "quickInstanceLoad index" << fieldIndex << "value" << memory->prettyValue(val).constData();
+    push( val );
 }
 
 void Interpreter::dispatchPrimitives()
@@ -1405,57 +1471,70 @@ void Interpreter::dispatchControlPrimitives()
 void Interpreter::dispatchInputOutputPrimitives()
 {
     // TODO BB p. 648ff
-    ST_TRACE_PRIMITIVE("WARNING: not yet implemented");
-
     switch( primitiveIndex )
     {
     case 90:
         //primitiveMousePoint();
+        qWarning() << "WARNING: primitiveMousePoint not yet implemented";
         break;
     case 91:
         //primitiveCursorLocPut();
+        qWarning() << "WARNING: primitiveCursorLocPut not yet implemented";
         break;
     case 92:
         //primitiveCursorLink();
+        qWarning() << "WARNING: primitiveCursorLink not yet implemented";
         break;
     case 93:
         //primitiveInputSemaphore();
+        qWarning() << "WARNING: primitiveInputSemaphore not yet implemented";
         break;
     case 94:
         //primitiveSamleInterval();
+        qWarning() << "WARNING: primitiveSamleInterval not yet implemented";
         break;
     case 95:
         //primitiveInputWord();
+        qWarning() << "WARNING: primitiveInputWord not yet implemented";
         break;
     case 96:
         //primitiveCopyBits();
+        qWarning() << "WARNING: primitiveCopyBits not yet implemented";
         break;
     case 97:
         //primitiveSnapshot();
+        qWarning() << "WARNING: primitiveSnapshot not yet implemented";
         break;
     case 98:
         //primitiveTimeWordsInto();
+        qWarning() << "WARNING: primitiveTimeWordsInto not yet implemented";
         break;
     case 99:
         //primitiveTickWordsInto();
+        qWarning() << "WARNING: primitiveTickWordsInto not yet implemented";
         break;
     case 100:
         //primitiveSignalAtClick();
+        qWarning() << "WARNING: primitiveSignalAtClick not yet implemented";
         break;
     case 101:
         //primitiveBeCursor();
+        qWarning() << "WARNING: primitiveBeCursor not yet implemented";
         break;
     case 102:
-        //primitiveBeDisplay();
+        primitiveBeDisplay();
         break;
     case 103:
         //primitiveScanCharacters();
+        primitiveFail(); // optional primitive not implemented
         break;
     case 104:
         //primitiveDrawLoop();
+        primitiveFail(); // optional primitive not implemented
         break;
     case 105:
         //primitiveStringReplace();
+        qWarning() << "WARNING: primitiveStringReplace not yet implemented";
         break;
     default:
         primitiveFail();
@@ -1465,7 +1544,6 @@ void Interpreter::dispatchInputOutputPrimitives()
 
 void Interpreter::dispatchSystemPrimitives()
 {
-    // TODO
     switch( primitiveIndex )
     {
     case 110:
@@ -1476,12 +1554,13 @@ void Interpreter::dispatchSystemPrimitives()
         break;
     case 112:
         //primitiveCoreLeft(); // number of unallocated Words in object space
-        pushInteger(0x2fff); // phantasy number
+        pushInteger(0xefff); // phantasy number
         break;
     case 113:
         primitiveQuit();
         break;
     case 114:
+        qWarning() << "WARNING: primitiveExitToDebugger not yet implemnted";
         //primitiveExitToDebugger();
         break;
     case 115:
@@ -1489,6 +1568,7 @@ void Interpreter::dispatchSystemPrimitives()
         pushInteger( memory->getOopsLeft() );
         break;
     case 116:
+        qWarning() << "WARNING: primitiveSignalAtOopsLeftWordsLeft not yet implemnted";
         //primitiveSignalAtOopsLeftWordsLeft();
         break;
     default:
@@ -1775,10 +1855,10 @@ void Interpreter::primitiveAtPut()
 
 void Interpreter::primitiveSize()
 {
-    ST_TRACE_PRIMITIVE("");
     OOP array = popStack();
     OOP cls = memory->fetchClassOf(array);
     OOP length = positive16BitIntegerFor( lengthOf(array) - fixedFieldsOf(cls) );
+    ST_TRACE_PRIMITIVE("size" << memory->integerValueOf(length));
     if( success )
         push(length);
     else
@@ -2383,7 +2463,8 @@ void Interpreter::suspendActive()
 
 void Interpreter::primitiveQuit()
 {
-    Display::inst()->close();
+    qApp->quit();
+    // Display::inst()->close();
 }
 
 void Interpreter::createActualMessage()
@@ -2413,6 +2494,19 @@ QByteArray Interpreter::prettyArgs_()
         res += memory->prettyValue( stackValue(argumentCount- (i+1) ) );
     }
     return res;
+}
+
+void Interpreter::primitiveBeDisplay()
+{
+    OOP displayScreen = popStack();
+    // OOP cls = memory->fetchClassOf(displayScreen);
+    // qDebug() << memory->fetchClassName(cls);
+    // checked that cls is in fact DisplayScreen
+    OOP bitmap = memory->fetchWordOfObject(0,displayScreen);
+    quint16 width = memory->integerValueOf(memory->fetchWordOfObject(1,displayScreen));
+    quint16 height = memory->integerValueOf(memory->fetchWordOfObject(2,displayScreen));
+    Q_ASSERT( memory->fetchByteLenghtOf(bitmap) == width * height / 8 );
+    Display::inst()->setBuffer(memory->fetchByteString(bitmap).d_bytes,width,height);
 }
 
 void Interpreter::primitiveQuo()

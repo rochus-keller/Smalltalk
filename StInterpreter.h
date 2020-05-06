@@ -279,11 +279,12 @@ namespace St
         void createActualMessage();
         void sendMustBeBoolean();
         QByteArray prettyArgs_();
+        void primitiveBeDisplay();
     private:
         ObjectMemory2* memory;
         qint16 stackPointer, instructionPointer, argumentCount, primitiveIndex, semaphoreIndex;
         QList<OOP> semaphoreList;
-        quint32 cycleNr;
+        quint32 cycleNr, level;
         quint8 currentBytecode;
         bool d_run, success, newProcessWaiting;
     };

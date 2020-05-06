@@ -28,7 +28,7 @@ class QTextBrowser;
 class QLabel;
 class QTreeWidgetItem;
 
-#define ST_OBJECT_MEMORY ObjectMemory
+#define ST_OBJECT_MEMORY ObjectMemory2
 
 namespace St
 {

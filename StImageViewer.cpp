@@ -285,7 +285,7 @@ public:
 
     struct Slot
     {
-        enum Kind { Frame, Int, String, Character, Float, Chunk, Method, Continuation, Bytecode };
+        enum Kind { Frame, Int, String, Character, Float, LargeInt, Chunk, Method, Continuation, Bytecode };
         quint16 d_oop;
         quint8 d_kind;
         QList<Slot*> d_children;
@@ -313,6 +313,9 @@ public:
             break;
         case ST_OBJECT_MEMORY::classSmallInteger:
             s->d_kind = Slot::Int;
+            break;
+        case ST_OBJECT_MEMORY::classLargePositiveInteger:
+            s->d_kind = Slot::LargeInt;
             break;
         default:
             if( !d_om->hasPointerMembers(s->d_oop) )
@@ -349,6 +352,13 @@ public:
                 ST_OBJECT_MEMORY::ByteString bs = d_om->fetchByteString(s->d_oop);
                 const QByteArray str = QByteArray::fromRawData((const char*)bs.d_bytes, bs.d_len).toHex();
                 return QString("%1 = %2").arg( str.constData() ).arg( d_om->fetchFloat(s->d_oop) );
+            }
+            break;
+        case Slot::LargeInt:
+            {
+                ST_OBJECT_MEMORY::ByteString bs = d_om->fetchByteString(s->d_oop);
+                const QByteArray str = QByteArray::fromRawData((const char*)bs.d_bytes, bs.d_len).toHex();
+                return QString("%1 = %2L").arg( str.constData() ).arg( d_om->largeIntegerValueOf(s->d_oop) );
             }
             break;
         case Slot::Chunk:
@@ -1281,7 +1291,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Image Viewer");
-    a.setApplicationVersion("0.7.1");
+    a.setApplicationVersion("0.7.2");
     a.setStyle("Fusion");
 
     ImageViewer w;

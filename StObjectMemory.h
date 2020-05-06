@@ -154,9 +154,11 @@ namespace St
         struct Data
         {
             quint32 d_pos;
-            quint32 d_len : 31;
+            quint32 d_len : 30;
             quint32 d_isPtr : 1;
-            Data():d_pos(0),d_len(0),d_isPtr(false){}
+            quint32 d_isOdd : 1;
+            Data():d_pos(0),d_len(0),d_isPtr(false),d_isOdd(false){}
+            quint32 getLen() const { return d_len - ( d_isOdd ? 1 : 0 ); }
         };
         Data getDataOf(quint16 oop , bool noHeader = true ) const;
         qint32 findNextFree();
