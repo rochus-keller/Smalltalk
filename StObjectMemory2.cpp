@@ -349,12 +349,13 @@ ObjectMemory2::OOP ObjectMemory2::fetchPointerOfObject(quint16 fieldIndex, OOP o
 {
     const OtSlot& s = getSlot(objectPointer);
     const quint32 off = fieldIndex * 2;
-    Q_ASSERT( s.d_isPtr && ( off + 1 ) < s.byteLen() );
+    Q_ASSERT( ( off + 1 ) < s.byteLen() ); // removed isPtr check
     return readU16( s.d_obj->d_data, off );
 }
 
 void ObjectMemory2::storePointerOfObject(quint16 fieldIndex, OOP objectPointer, OOP withValue)
 {
+    Q_ASSERT( objectPointer != 0 );
     const OtSlot& s = getSlot(objectPointer);
     const quint32 off = fieldIndex * 2;
     Q_ASSERT( ( off + 1 ) < s.byteLen() );
@@ -446,7 +447,7 @@ QByteArray ObjectMemory2::fetchByteArray(ObjectMemory2::OOP objectPointer, bool 
     if( bs.d_bytes )
     {
         if( rawData )
-            return QByteArray::fromRawData( (const char*)bs.d_bytes, bs.d_len );
+            return QByteArray::fromRawData( (const char*)bs.d_bytes, bs.d_byteLen );
         else
             return (const char*)bs.d_bytes;
     }else
@@ -766,6 +767,7 @@ void ObjectMemory2::collectGarbage()
         mark( oop );
     }
 
+    int count = 0;
     // sweep
     for( int i = 0; i < d_ot.d_slots.size(); i++ )
     {
@@ -775,11 +777,12 @@ void ObjectMemory2::collectGarbage()
         if( !s.d_obj->d_flags.test(Object::Marked) )
         {
             d_ot.free(i);
+            count++;
         }else
             s.d_obj->d_flags.set(Object::Marked, false);
     }
 
-
+    qDebug() << "collectGarbage freed oop:" << count;
 }
 
 void ObjectMemory2::mark(OOP oop)

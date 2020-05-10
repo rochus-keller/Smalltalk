@@ -26,6 +26,9 @@
 
 namespace St
 {
+    // This is a textbook implementation according to Blue Book part 4.
+    // Known to be inefficient; focus is on functionality and compliance.
+
     class Interpreter : public QObject
     {
     public:
@@ -280,6 +283,11 @@ namespace St
         void sendMustBeBoolean();
         QByteArray prettyArgs_();
         void primitiveBeDisplay();
+        void primitiveCopyBits();
+        void primitiveStringReplace();
+        void dumpStack_(const char* title = "");
+        void primitiveBeCursor();
+        void primitiveCursorLink();
     private:
         ObjectMemory2* memory;
         qint16 stackPointer, instructionPointer, argumentCount, primitiveIndex, semaphoreIndex;

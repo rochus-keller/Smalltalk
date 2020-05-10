@@ -24,6 +24,7 @@
 #include <QApplication>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QtDebug>
 using namespace St;
 
 VirtualMachine::VirtualMachine(QObject* parent) : QObject(parent)

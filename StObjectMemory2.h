@@ -97,8 +97,9 @@ namespace St
         struct ByteString
         {
             const quint8* d_bytes;
-            quint16 d_len;
-            ByteString(const quint8* b, quint16 l):d_bytes(b),d_len(l){}
+            quint16 d_byteLen;
+            ByteString(const quint8* b, quint16 l):d_bytes(b),d_byteLen(l){}
+            quint16 getWordLen() const { return ( d_byteLen + 1 ) / 2; }
         };
 
         ObjectMemory2(QObject* p = 0);

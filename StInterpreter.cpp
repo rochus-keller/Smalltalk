@@ -23,8 +23,8 @@
 #include <QApplication>
 using namespace St;
 
-#define ST_DO_TRACING
-#define ST_DO_TRACE2
+//#define ST_DO_TRACING
+//#define ST_DO_TRACE2
 
 #ifdef ST_DO_TRACING
 #ifdef ST_DO_TRACE2
@@ -78,6 +78,18 @@ static ObjectMemory2::OOP findDisplay(ObjectMemory2* memory)
     return 0;
 }
 
+static Bitmap fetchBitmap( ObjectMemory2* memory, Interpreter::OOP form )
+{
+    if( form == ObjectMemory2::objectNil )
+        return Bitmap();
+    Interpreter::OOP bitmap = memory->fetchWordOfObject(0,form);
+    quint16 width = memory->integerValueOf(memory->fetchWordOfObject(1,form));
+    quint16 height = memory->integerValueOf(memory->fetchWordOfObject(2,form));
+    // Q_ASSERT( memory->fetchByteLenghtOf(bitmap) == width * height / 8 );
+    ObjectMemory2::ByteString bs = memory->fetchByteString(bitmap);
+    return Bitmap( const_cast<quint8*>(bs.d_bytes), bs.getWordLen(), width, height );
+}
+
 void Interpreter::setOm(ObjectMemory2* om)
 {
     memory = om;
@@ -85,13 +97,9 @@ void Interpreter::setOm(ObjectMemory2* om)
     if( om )
     {
         const OOP display = findDisplay(memory); // 0x340;
-        OOP bitmap = memory->fetchWordOfObject(0,display);
-        quint16 width = memory->integerValueOf(memory->fetchWordOfObject(1,display));
-        quint16 height = memory->integerValueOf(memory->fetchWordOfObject(2,display));
-        Q_ASSERT( memory->fetchByteLenghtOf(bitmap) == width * height / 8 );
-        Display::inst()->setBuffer(memory->fetchByteString(bitmap).d_bytes,width,height);
+        Display::inst()->setBitmap( fetchBitmap(memory, display) );
     }else
-        Display::inst()->setBuffer(0,0,0);
+        Display::inst()->setBitmap(Bitmap());
 }
 
 void Interpreter::interpret()
@@ -110,6 +118,7 @@ void Interpreter::interpret()
 
     while( d_run ) // && cycleNr < 2000 ) // TEST trace2 < 500 trace3 < 2000
     {
+        // TODO: runs until "[cycle=269451] <a Semaphore> 8d8e wait" and stays there
         cycle();
         qApp->processEvents();
     }
@@ -334,7 +343,8 @@ void Interpreter::checkProcessSwitch()
     {
         semaphoreIndex = false;
         OOP activeProcess_ = memory->getRegister(activeProcess());
-        memory->storePointerOfObject(SuspendedContextIndex, activeProcess_, memory->getRegister(ActiveContext));
+        if( activeProcess_ )
+            memory->storePointerOfObject(SuspendedContextIndex, activeProcess_, memory->getRegister(ActiveContext));
         memory->storePointerOfObject(ActiveProcessIndex, schedulerPointer(), memory->getRegister(NewProcess) );
         newActiveContext( memory->fetchPointerOfObject( SuspendedContextIndex, memory->getRegister(NewProcess) ));
     }
@@ -793,7 +803,10 @@ void Interpreter::sendSelector(Interpreter::OOP selector, quint16 count)
     memory->setRegister(MessageSelector, selector );
     argumentCount = count;
     OOP newReceiver = stackValue(argumentCount);
-    sendSelectorToClass( memory->fetchClassOf(newReceiver) );
+    if( newReceiver )
+        sendSelectorToClass( memory->fetchClassOf(newReceiver) );
+    else
+        qCritical() << "ERROR: sendSelector" << memory->fetchByteArray(selector) << "to zero receiver";
 }
 
 void Interpreter::sendSelectorToClass(Interpreter::OOP classPointer)
@@ -1476,30 +1489,33 @@ void Interpreter::dispatchInputOutputPrimitives()
     case 90:
         //primitiveMousePoint();
         qWarning() << "WARNING: primitiveMousePoint not yet implemented";
+        primitiveFail();
         break;
     case 91:
         //primitiveCursorLocPut();
         qWarning() << "WARNING: primitiveCursorLocPut not yet implemented";
+        primitiveFail();
         break;
     case 92:
-        //primitiveCursorLink();
-        qWarning() << "WARNING: primitiveCursorLink not yet implemented";
+        primitiveCursorLink();
         break;
     case 93:
         //primitiveInputSemaphore();
         qWarning() << "WARNING: primitiveInputSemaphore not yet implemented";
+        primitiveFail();
         break;
     case 94:
         //primitiveSamleInterval();
         qWarning() << "WARNING: primitiveSamleInterval not yet implemented";
+        primitiveFail();
         break;
     case 95:
         //primitiveInputWord();
         qWarning() << "WARNING: primitiveInputWord not yet implemented";
+        primitiveFail();
         break;
     case 96:
-        //primitiveCopyBits();
-        qWarning() << "WARNING: primitiveCopyBits not yet implemented";
+        primitiveCopyBits();
         break;
     case 97:
         //primitiveSnapshot();
@@ -1512,14 +1528,15 @@ void Interpreter::dispatchInputOutputPrimitives()
     case 99:
         //primitiveTickWordsInto();
         qWarning() << "WARNING: primitiveTickWordsInto not yet implemented";
+        primitiveFail();
         break;
     case 100:
         //primitiveSignalAtClick();
         qWarning() << "WARNING: primitiveSignalAtClick not yet implemented";
+        primitiveFail();
         break;
     case 101:
-        //primitiveBeCursor();
-        qWarning() << "WARNING: primitiveBeCursor not yet implemented";
+        primitiveBeCursor();
         break;
     case 102:
         primitiveBeDisplay();
@@ -1533,8 +1550,7 @@ void Interpreter::dispatchInputOutputPrimitives()
         primitiveFail(); // optional primitive not implemented
         break;
     case 105:
-        //primitiveStringReplace();
-        qWarning() << "WARNING: primitiveStringReplace not yet implemented";
+        primitiveStringReplace();
         break;
     default:
         primitiveFail();
@@ -2499,14 +2515,87 @@ QByteArray Interpreter::prettyArgs_()
 void Interpreter::primitiveBeDisplay()
 {
     OOP displayScreen = popStack();
+
     // OOP cls = memory->fetchClassOf(displayScreen);
     // qDebug() << memory->fetchClassName(cls);
     // checked that cls is in fact DisplayScreen
-    OOP bitmap = memory->fetchWordOfObject(0,displayScreen);
-    quint16 width = memory->integerValueOf(memory->fetchWordOfObject(1,displayScreen));
-    quint16 height = memory->integerValueOf(memory->fetchWordOfObject(2,displayScreen));
-    Q_ASSERT( memory->fetchByteLenghtOf(bitmap) == width * height / 8 );
-    Display::inst()->setBuffer(memory->fetchByteString(bitmap).d_bytes,width,height);
+    Display::inst()->setBitmap( fetchBitmap(memory, displayScreen) );
+}
+
+void Interpreter::primitiveCopyBits()
+{
+    /* Stack:
+    9 "<a BitBlt>" // there is always a BitBlt or one of its subclasses top of the stack
+    8 "<a Form>"
+    7 "3"
+    6 "<a Rectangle>"
+    */
+    OOP bitblt = stackValue(0);
+
+    Bitmap destBits = fetchBitmap(memory, memory->fetchPointerOfObject(0,bitblt) );
+    Bitmap sourceBits = fetchBitmap(memory, memory->fetchPointerOfObject(1,bitblt) );
+    Bitmap halftoneBits = fetchBitmap(memory, memory->fetchPointerOfObject(2,bitblt) );
+
+    BitBlt::Input in;
+    if( !destBits.isNull() )
+        in.destBits = &destBits;
+    if( !sourceBits.isNull() )
+        in.sourceBits = &sourceBits;
+    if( !halftoneBits.isNull() )
+        in.halftoneBits = &halftoneBits;
+
+    in.combinationRule = memory->largeIntegerValueOf( memory->fetchPointerOfObject(3,bitblt) );
+    in.destX = memory->largeIntegerValueOf( memory->fetchPointerOfObject(4,bitblt) );
+    in.destY = memory->largeIntegerValueOf( memory->fetchPointerOfObject(5,bitblt) );
+    in.width = memory->largeIntegerValueOf( memory->fetchPointerOfObject(6,bitblt) );
+    in.height = memory->largeIntegerValueOf( memory->fetchPointerOfObject(7,bitblt) );
+    in.sourceX = memory->largeIntegerValueOf( memory->fetchPointerOfObject(8,bitblt) );
+    in.sourceY = memory->largeIntegerValueOf( memory->fetchPointerOfObject(9,bitblt) );
+    in.clipX = memory->largeIntegerValueOf( memory->fetchPointerOfObject(10,bitblt) );
+    in.clipY = memory->largeIntegerValueOf( memory->fetchPointerOfObject(11,bitblt) );
+    in.clipWidth = memory->largeIntegerValueOf( memory->fetchPointerOfObject(12,bitblt) );
+    in.clipHeight = memory->largeIntegerValueOf( memory->fetchPointerOfObject(13,bitblt) );
+
+    BitBlt bb( in );
+    bb.copyBits();
+
+    // checked that if we pop BitBlt then the interpreter behaves stranegly and eventually crashes.
+}
+
+void Interpreter::primitiveStringReplace()
+{
+    primitiveFail(); // optional, apparently has as smalltalk implementation
+    // pop(4);
+    // qWarning() << "TODO: primitiveStringReplace";
+}
+
+void Interpreter::dumpStack_(const char* title)
+{
+    qDebug() << "**********" << title << "argcount" << argumentCount << "begin stack:";
+#if 0
+    for( int i = 0; i < argumentCount; i++ )
+        qDebug() << i << memory->prettyValue( stackValue(argumentCount- (i+1) ) );
+#else
+    for( int i = stackPointer; i > TempFrameStart; i-- )
+        qDebug() << i << memory->prettyValue(
+                        memory->fetchPointerOfObject( i, memory->getRegister(ActiveContext) ) ).constData();
+#endif
+    qDebug() << "***** end stack";
+}
+
+void Interpreter::primitiveBeCursor()
+{
+    //dumpStack_("primitiveBeCursor");
+    pop(1); // cursor instance
+    qWarning() << "WARNING: primitiveBeCursor not yet implemented";
+
+}
+
+void Interpreter::primitiveCursorLink()
+{
+    //dumpStack_("primitiveCursorLink");
+    pop(1); // bool
+    qWarning() << "WARNING: primitiveCursorLink not yet implemented";
 }
 
 void Interpreter::primitiveQuo()
