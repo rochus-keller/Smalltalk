@@ -244,7 +244,7 @@ void BitBlt::clipRange()
         h = height - clipY + destY;
         dy = clipY;
     }
-    if( ( dy + h ) >= ( clipY + clipHeight ) )
+    if( ( dy + h ) > ( clipY + clipHeight ) )
         h = h - ( ( dy + h ) - ( clipY + clipHeight ) );
     if( sx < 0 )
     {
@@ -262,12 +262,23 @@ void BitBlt::clipRange()
     }
     if( sourceBits != 0 && ( sy + h ) > sourceBits->height() )
         h = h - ( sy + h - sourceBits->height() );
+}
+
+void BitBlt::computeMasks()
+{
+    // destBits = destForm bits
+    destRaster = ( ( destBits->width() - 1 ) / 16 ) + 1;
+    if( sourceBits != 0 )
+        sourceRaster = ( ( sourceBits->width() - 1 ) / 16 ) + 1;
+    else
+        sourceRaster = 0;
+    // halftoneBits = halftoneForm bits
     skew = ( sx - dx ) & 15;
-    startBits = 16 - ( dx & 15 );
-    mask1 = RightMasks[ startBits + 1 ];
-    endBits = 15 - ( ( dx + w - 1 ) & 15 );
-    mask2 = ~RightMasks[ endBits + 1 ];
-    skewMask = skew == 0 ? 0 : RightMasks[ 16 - skew + 1 ];
+    quint16 startBits = 16 - ( dx & 15 );
+    mask1 = RightMasks[ startBits /* + 1 */ ];
+    quint16 endBits = 15 - ( ( dx + w - 1 ) & 15 );
+    mask2 = ~RightMasks[ endBits /* + 1 */ ];
+    skewMask = skew == 0 ? 0 : RightMasks[ 16 - skew /* + 1 */ ];
     if( w < startBits )
     {
         mask1 = mask1 && mask2;
@@ -277,30 +288,26 @@ void BitBlt::clipRange()
         nWords = ( w - startBits - 1 ) / 16 + 2;
 }
 
-void BitBlt::computeMasks()
-{
-    destRaster = ( ( destBits->width() - 1 ) / 16 ) + 1;
-    if( sourceBits != 0 )
-        sourceRaster = ( ( sourceBits->width() - 1 ) / 16 ) + 1;
-}
-
 void BitBlt::checkOverlap()
 {
     hDir = vDir = 1;
     if( sourceBits == destBits && dy >= sy )
     {
-        vDir = -1;
-        sy = sy + h - 1;
-        dy = dy + h - 1;
-    }else if( dx > sx )
-    {
-        hDir = -1;
-        sx = sx + w - 1;
-        dx = dx + w - 1;
-        skewMask = ~skewMask;
-        int t = mask1;
-        mask1 = mask2;
-        mask2 = t;
+        if( dy > sy )
+        {
+            vDir = -1;
+            sy = sy + h - 1;
+            dy = dy + h - 1;
+        }else if( dx > sx )
+        {
+            hDir = -1;
+            sx = sx + w - 1;
+            dx = dx + w - 1;
+            skewMask = ~skewMask;
+            int t = mask1;
+            mask1 = mask2;
+            mask2 = t;
+        }
     }
 }
 
@@ -313,6 +320,15 @@ void BitBlt::calculateOffsets()
     destIndex = dy * destRaster + dx / 16;
     sourceDelta = sourceRaster * vDir - ( nWords + ( preload ? 1 : 0 ) * hDir );
     destDelta = destRaster * vDir - nWords * hDir;
+}
+
+static inline qint16 shiftLeft( qint16 v, qint16 n )
+{
+    Q_ASSERT( v >= 0 );
+    if( n >= 0 )
+        return v << n;
+    else
+        return v >> -n;
 }
 
 void BitBlt::copyLoop()
@@ -334,18 +350,18 @@ void BitBlt::copyLoop()
             sourceIndex = sourceIndex + hDir;
         }else
             prevWord = 0;
-        quint16 mergeMask = mask1, mergeWord;
+        quint16 mergeMask = mask1;
         for( quint16 word = 1; word <= nWords; word++ )
         {
             if( sourceBits != 0 )
             {
                 prevWord = prevWord & skewWord;
                 thisWord = sourceBits->wordAt( sourceIndex + 1 );
-                skewWord = prevWord | ~( thisWord & skewMask );
+                skewWord = prevWord | ( thisWord & ~skewMask );
                 prevWord = thisWord;
-                skewWord = ( skewWord << skew ) | ( skewWord << ( skew - 16 ) );
+                skewWord = shiftLeft( skewWord, skew ) | shiftLeft( skewWord, skew - 16 );
             }
-            mergeWord = merge( skewWord & halftoneWord, destBits->wordAt( destIndex + 1 ) );
+            quint16 mergeWord = merge( skewWord & halftoneWord, destBits->wordAt( destIndex + 1 ) );
             destBits->wordAtPut( destIndex + 1, ( mergeMask & mergeWord ) |
                                  ( ~mergeMask & destBits->wordAt( destIndex + 1 ) ) );
             sourceIndex = sourceIndex + hDir;
@@ -400,10 +416,10 @@ quint16 BitBlt::merge(quint16 source, quint16 destination)
     return 0;
 }
 
-const quint16 BitBlt::RightMasks[] = {
-    0, 0x1, 0x3, 0x7, 0xf,
-       0x1f, 0x3f, 0x7f, 0xff,
-       0x1ff, 0x3ff, 0x7fff, 0xffff
-};
+const QList<quint16> BitBlt::RightMasks = QList<quint16>() <<
+    0 << 0x1 << 0x3 << 0x7 << 0xf <<
+       0x1f << 0x3f << 0x7f << 0xff <<
+       0x1ff << 0x3ff << 0x7ff << 0xfff <<
+       0x1fff << 0x3fff << 0x7fff << 0xffff;
 
 const quint16 BitBlt::AllOnes = 0xffff;

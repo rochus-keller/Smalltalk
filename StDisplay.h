@@ -87,14 +87,14 @@ namespace St
         Bitmap* destBits;
         quint16 destRaster;
         Bitmap* halftoneBits;
-        int skew, startBits, endBits, mask1, mask2, skewMask, nWords, vDir, hDir;
+        int skew, mask1, mask2, skewMask, nWords, vDir, hDir;
         int sx, sy, dx, dy, w, h;
         int destX, clipX, clipWidth, sourceX, width;
         int destY, clipY, clipHeight, sourceY, height;
         int sourceIndex, destIndex, sourceDelta, destDelta;
         quint8 combinationRule;
         bool preload;
-        static const quint16 RightMasks[];
+        static const QList<quint16> RightMasks;
         static const quint16 AllOnes;
     };
 }

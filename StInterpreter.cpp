@@ -1201,6 +1201,7 @@ void Interpreter::primitiveBitShift()
     qint16 integerResult = 0;
     if( success )
     {
+        Q_ASSERT( integerReceiver >= 0 );
         if( integerArgument >= 0 ) // TODO: check
             integerResult = integerReceiver << integerArgument;
         else
