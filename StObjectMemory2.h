@@ -24,6 +24,7 @@
 #include <QSet>
 #include <QVector>
 #include <bitset>
+#include <QQueue>
 
 class QIODevice;
 
@@ -114,7 +115,7 @@ namespace St
         typedef QHash<quint16, QList<quint16> > Xref;
         const Xref& getXref() const { return d_xref; }
         void setRegister( quint8 index, quint16 value );
-        quint16 getRegister( quint8 index ) const;
+        inline quint16 getRegister( quint8 index ) const;
         void addTemp(OOP oop);
         void removeTemp(OOP oop);
         OOP getNextInstance( OOP cls, OOP cur = 0 ) const;
@@ -123,7 +124,7 @@ namespace St
         // oop 0 is reserved as an invalid object pointer!
 
         bool hasPointerMembers( OOP objectPointer ) const;
-        OOP fetchPointerOfObject( quint16 fieldIndex, OOP objectPointer ) const;
+        inline OOP fetchPointerOfObject( quint16 fieldIndex, OOP objectPointer ) const;
         void storePointerOfObject( quint16 fieldIndex, OOP objectPointer, OOP withValue );
         quint16 fetchWordOfObject( quint16 fieldIndex, OOP objectPointer ) const;
         void storeWordOfObject( quint16 fieldIndex, OOP objectPointer, quint16 withValue );
@@ -171,6 +172,17 @@ namespace St
         OOP instantiateClass( OOP cls, quint16 byteLen, bool isPtr );
         void mark(OOP);
 
+        static inline quint16 readU16( const QByteArray& data, int off )
+        {
+            Q_ASSERT( off + 1 < data.size() );
+            return ( quint8(data[off]) << 8 ) + quint8(data[off+1] );
+        }
+
+        static inline quint16 readU16( const quint8* data, int off )
+        {
+            return ( quint8(data[off]) << 8 ) + quint8(data[off+1] );
+        }
+
     private:
         struct Object
         {
@@ -201,12 +213,36 @@ namespace St
         };
 
         ObjectTable d_ot;
-        const OtSlot& getSlot( OOP oop ) const;
+        inline const OtSlot& getSlot( OOP oop ) const;
         QSet<quint16> d_objects, d_classes, d_metaClasses;
         QVector<quint16> d_registers;
         QSet<quint16> d_temps;
+        QQueue<quint16> d_freeSlots;
         Xref d_xref;
     };
+
+    const ObjectMemory2::OtSlot&ObjectMemory2::getSlot(ObjectMemory2::OOP oop) const
+    {
+        const quint32 i = oop >> 1;
+        Q_ASSERT( i < d_ot.d_slots.size() );
+        return d_ot.d_slots[i];
+    }
+
+    ObjectMemory2::OOP ObjectMemory2::fetchPointerOfObject(quint16 fieldIndex, OOP objectPointer) const
+    {
+        const OtSlot& s = getSlot(objectPointer);
+        const quint32 off = fieldIndex * 2;
+        Q_ASSERT( ( off + 1 ) < s.byteLen() ); // removed isPtr check
+        return readU16( s.d_obj->d_data, off );
+    }
+
+    quint16 ObjectMemory2::getRegister(quint8 index) const
+    {
+        if( index < d_registers.size() )
+            return d_registers[index];
+        else
+            return 0;
+    }
 }
 
 #endif // ST_OBJECT_MEMORY_2_H

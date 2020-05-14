@@ -46,25 +46,14 @@ static quint32 readU32( QIODevice* in )
             ( quint8(buf[2]) << 8 ) + quint8(buf[3] );
 }
 
-static quint16 readU16( const QByteArray& data, int off )
-{
-    Q_ASSERT( off + 1 < data.size() );
-    return ( quint8(data[off]) << 8 ) + quint8(data[off+1] );
-}
-
-static quint16 readU16( const quint8* data, int off )
-{
-    return ( quint8(data[off]) << 8 ) + quint8(data[off+1] );
-}
-
-static void writeU16( QByteArray& data, int off, quint16 val )
+static inline void writeU16( QByteArray& data, int off, quint16 val )
 {
     Q_ASSERT( off + 1 < data.size() );
     data[off] = ( val >> 8 ) & 0xff;
     data[off+1] = val & 0xff;
 }
 
-static void writeU16( quint8* data, int off, quint16 val )
+static inline void writeU16( quint8* data, int off, quint16 val )
 {
     data[off] = ( val >> 8 ) & 0xff;
     data[off+1] = val & 0xff;
@@ -152,12 +141,17 @@ bool ObjectMemory2::readFrom(QIODevice* in)
     d_objects.clear();
     d_classes.clear();
     d_metaClasses.clear();
+    d_freeSlots.clear();
 
     for( int i = 0; i < d_ot.d_slots.size(); i++ )
     {
         const OtSlot& slot = d_ot.d_slots[i];
         if( slot.isFree() )
+        {
+            if( i != 0 )
+                d_freeSlots.enqueue(i);
             continue;
+        }
         const quint16 oop = i << 1;
         Q_ASSERT( !d_objects.contains(oop) );
         d_objects << oop;
@@ -238,14 +232,6 @@ void ObjectMemory2::setRegister(quint8 index, quint16 value)
     if( index >= d_registers.size() )
         d_registers.resize( d_registers.size() + 10 );
     d_registers[index] = value;
-}
-
-quint16 ObjectMemory2::getRegister(quint8 index) const
-{
-    if( index < d_registers.size() )
-        return d_registers[index];
-    else
-        return 0;
 }
 
 void ObjectMemory2::addTemp(OOP oop)
@@ -343,14 +329,6 @@ bool ObjectMemory2::hasPointerMembers(OOP objectPointer) const
         return false;
     const OtSlot& s = getSlot(objectPointer);
     return s.d_isPtr;
-}
-
-ObjectMemory2::OOP ObjectMemory2::fetchPointerOfObject(quint16 fieldIndex, OOP objectPointer) const
-{
-    const OtSlot& s = getSlot(objectPointer);
-    const quint32 off = fieldIndex * 2;
-    Q_ASSERT( ( off + 1 ) < s.byteLen() ); // removed isPtr check
-    return readU16( s.d_obj->d_data, off );
 }
 
 void ObjectMemory2::storePointerOfObject(quint16 fieldIndex, OOP objectPointer, OOP withValue)
@@ -715,12 +693,9 @@ int ObjectMemory2::largeIntegerValueOf(OOP integerPointer) const
 
 int ObjectMemory2::findFreeSlot()
 {
-    // not efficient, but good enough for now
-    for( int i = classSymbol / 2; i < d_ot.d_slots.size(); i++ )
-    {
-        if( d_ot.d_slots[i].isFree() )
-            return i;
-    }
+    // this is not the OOP but directly the d_slots index
+    if( !d_freeSlots.isEmpty() )
+        return d_freeSlots.dequeue();
     return -1;
 }
 
@@ -818,13 +793,6 @@ void ObjectMemory2::mark(OOP oop)
     }
 
     mark( s.getClass() );
-}
-
-const ObjectMemory2::OtSlot&ObjectMemory2::getSlot(ObjectMemory2::OOP oop) const
-{
-    const quint32 i = oop >> 1;
-    Q_ASSERT( i < d_ot.d_slots.size() );
-    return d_ot.d_slots[i];
 }
 
 ObjectMemory2::OtSlot* ObjectMemory2::ObjectTable::allocate(quint16 slot, quint16 numOfBytes, OOP cls, bool isPtr)

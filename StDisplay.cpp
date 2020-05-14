@@ -21,72 +21,10 @@
 #include <QFile>
 #include <QPainter>
 #include <stdint.h>
+#include <QtDebug>
 using namespace St;
 
 static Display* s_inst = 0;
-
-#if 0
-struct BS_Stream
-{
-    const uint8_t* bytes;
-    int pos, size;
-    uint32_t accu;
-    int bits;
-};
-
-void BS_init(struct BS_Stream* bs, const uint8_t* buf, int size)
-{
-    bs->accu = 0;
-    bs->bits = 0;
-    bs->bytes = buf;
-    bs->size = size;
-    bs->pos = 0;
-}
-
-uint8_t BS_readBits(struct BS_Stream* stream, uint8_t nextNBits)
-{
-    Q_ASSERT( nextNBits <= 8 );
-    int shiftRight = 0;
-    uint8_t res = 0;
-    uint8_t* buf = &res;
-
-    uint32_t accu = stream->accu;
-    int bitsUnread = stream->bits;
-    int mask;
-
-    while( nextNBits > 0 )
-    {
-        while( bitsUnread && nextNBits )
-        {
-            mask = 128 >> shiftRight; // start with 1'0000'0000b and move to right by shiftRight
-            if( accu & (1 << (bitsUnread - 1)) )
-                *buf |= mask;
-            else
-                *buf &= ~mask;
-
-            nextNBits--;
-            bitsUnread--;
-
-            if( ++shiftRight >= 8 )
-            {
-                shiftRight = 0;
-                buf++;
-            }
-        }
-        if( nextNBits == 0 )
-            break;
-        if( stream->pos >= stream->size )
-            break;
-        uint8_t nextByte = stream->bytes[stream->pos++];
-        accu = (accu << 8) | nextByte;
-        bitsUnread += 8;
-    }
-    stream->accu = accu;
-    stream->bits = bitsUnread;
-
-    return res;
-}
-#endif
 
 Display::Display(QWidget *parent) : QWidget(parent)
 {
@@ -94,8 +32,8 @@ Display::Display(QWidget *parent) : QWidget(parent)
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setCursor(Qt::BlankCursor);
-    showMaximized();
-    startTimer(30);
+    show();
+    startTimer(100); // 20ms according to BB
 }
 
 Display*Display::inst()
@@ -108,13 +46,9 @@ Display*Display::inst()
 void Display::setBitmap(const Bitmap& buf)
 {
     d_bitmap = buf;
+    d_img = QImage( d_bitmap.width(), d_bitmap.height(), QImage::Format_Mono );
+    setFixedSize( buf.width(), buf.height() );
     update();
-
-#if 0
-    QFile out( "bitmap" );
-    out.open(QIODevice::WriteOnly);
-    out.write((const char*)buf, d_width * d_height / 8 );
-#endif
 }
 
 void Display::paintEvent(QPaintEvent*)
@@ -122,32 +56,34 @@ void Display::paintEvent(QPaintEvent*)
     if( d_bitmap.isNull() )
         return;
     QPainter p(this);
-    p.fillRect(0,0,d_bitmap.width(),d_bitmap.height(), Qt::white );
-    p.setPen(Qt::black);
 
 #if 0
-    BS_Stream stream;
-    BS_init( &stream, d_buf, d_width * d_height / 8 );
-    for( int y = 0; y < d_height; y++ )
-    {
-        for( int x = 0; x < d_width; x++ )
-        {
-            quint8 pix = BS_readBits( &stream, 1 );
-            if( pix )
-                p.drawPoint(x, y);
-        }
-    }
-#else
+    p.fillRect(0,0,d_bitmap.width(),d_bitmap.height(), Qt::white );
+    p.setPen(Qt::black);
+    enum { white = 1, black = 0 };
+    img.fill(white);
     for( int y = 0; y < d_bitmap.height(); y++ )
     {
         for( int x = 0; x < d_bitmap.width(); x++ )
         {
             if( d_bitmap.testBit(x,y) )
-                p.drawPoint(x, y);
+                img.setPixel(x,y,black); // p.drawPoint(x, y);
         }
     }
+#else
+    // using QImage is much faster than drawing single points with QPainter
+    const int lw = d_bitmap.lineWidth() / 8;
+    for( int y = 0; y < d_bitmap.height(); y++ )
+    {
+        uchar* dest = d_img.scanLine(y);
+        const quint8* src = d_bitmap.scanLine(y);
+        for( int x = 0; x < lw; x++ )
+            dest[x] = ~src[x];
+        //memcpy( dest, src, lw );
+    }
+    //d_img.invertPixels();
 #endif
-
+    p.drawImage(0,0,d_img);
 }
 
 void Display::timerEvent(QTimerEvent*)
@@ -158,33 +94,32 @@ void Display::timerEvent(QTimerEvent*)
 Bitmap::Bitmap(quint8* buf, quint16 wordLen, quint16 pixWidth, quint16 pixHeight)
 {
     d_buf = buf;
+    // Q_ASSERT( wordLen == pixWidth * pixHeight / 16 ); // empirically found
+    // Q_ASSERT( d_width >= 16 && d_height >= 16 ); // empirically found
     d_wordLen = wordLen;
-    d_width = pixWidth;
-    d_height = pixHeight;
-    d_lineWidth = ( ( d_width + 7 ) / 8 ) * 8;
+    d_pixWidth = pixWidth;
+    d_pixHeight = pixHeight;
+    d_pixLineWidth = ( ( d_pixWidth + PixPerWord - 1 ) / PixPerWord ) * PixPerWord; // line width is a multiple of 16
 }
 
-bool Bitmap::testBit(quint16 x, quint16 y) const
-{
-    Q_ASSERT( x < d_width && y < d_height );
-    const int bytePos = ( y * d_lineWidth + x ) / 8;
-    const quint8 bitpos = 1 << ( 7 - x % 8 );
-    return ( d_buf[bytePos] & bitpos ) > 0;
-}
-
-static quint16 readU16( const quint8* data, int off )
+static inline quint16 readU16( const quint8* data, int off )
 {
     return ( quint8(data[off]) << 8 ) + quint8(data[off+1] );
 }
 
 quint16 Bitmap::wordAt(quint16 i) const
 {
-    Q_ASSERT( i <= d_wordLen );
-    i--;
-    return readU16( d_buf, i << 1 );
+    i--; // Smalltalk array indexes start with 1
+    if( i >= d_wordLen )
+    {
+        qCritical() << "ERROR: Bitmap::wordAt" << d_pixWidth << d_pixHeight << d_wordLen << "out of bounds" << i;
+        return 0;
+    }
+    Q_ASSERT( i < d_wordLen );
+    return readU16( d_buf, i * 2 );
 }
 
-static void writeU16( quint8* data, int off, quint16 val )
+static inline void writeU16( quint8* data, int off, quint16 val )
 {
     data[off] = ( val >> 8 ) & 0xff;
     data[off+1] = val & 0xff;
@@ -194,7 +129,7 @@ void Bitmap::wordAtPut(quint16 i, quint16 v)
 {
     Q_ASSERT( i <= d_wordLen );
     i--;
-    writeU16( d_buf, i << 1, v );
+    writeU16( d_buf, i * 2, v );
 }
 
 BitBlt::BitBlt(const Input& in)
@@ -270,18 +205,16 @@ void BitBlt::computeMasks()
     destRaster = ( ( destBits->width() - 1 ) / 16 ) + 1;
     if( sourceBits != 0 )
         sourceRaster = ( ( sourceBits->width() - 1 ) / 16 ) + 1;
-    else
-        sourceRaster = 0;
     // halftoneBits = halftoneForm bits
     skew = ( sx - dx ) & 15;
     quint16 startBits = 16 - ( dx & 15 );
-    mask1 = RightMasks[ startBits /* + 1 */ ];
+    mask1 = RightMasks[ startBits /* + 1 */ ]; // ST array index starts with 1
     quint16 endBits = 15 - ( ( dx + w - 1 ) & 15 );
     mask2 = ~RightMasks[ endBits /* + 1 */ ];
     skewMask = skew == 0 ? 0 : RightMasks[ 16 - skew /* + 1 */ ];
     if( w < startBits )
     {
-        mask1 = mask1 && mask2;
+        mask1 = mask1 & mask2;
         mask2 = 0;
         nWords = 1;
     }else
@@ -316,15 +249,15 @@ void BitBlt::calculateOffsets()
     preload = ( sourceBits != 0 && skew != 0 && skew <= ( sx & 15 ) );
     if( hDir < 0 )
         preload = preload == false;
-    sourceIndex = sy * sourceRaster + sx / 16;
-    destIndex = dy * destRaster + dx / 16;
-    sourceDelta = sourceRaster * vDir - ( nWords + ( preload ? 1 : 0 ) * hDir );
-    destDelta = destRaster * vDir - nWords * hDir;
+    sourceIndex = sy * sourceRaster + ( sx / 16 );
+    destIndex = dy * destRaster + ( dx / 16 );
+    sourceDelta = ( sourceRaster * vDir ) - ( nWords + ( preload ? 1 : 0 ) * hDir );
+    destDelta = ( destRaster * vDir ) - ( nWords * hDir );
 }
 
 static inline qint16 shiftLeft( qint16 v, qint16 n )
 {
-    Q_ASSERT( v >= 0 );
+    // TODO Q_ASSERT( v >= 0 );
     if( n >= 0 )
         return v << n;
     else
@@ -333,35 +266,35 @@ static inline qint16 shiftLeft( qint16 v, qint16 n )
 
 void BitBlt::copyLoop()
 {
+    int prevWord, thisWord, skewWord, mergeMask,
+            halftoneWord, mergeWord, word;
     for( int i = 1; i <= h; i++ )
     {
-        quint16 halftoneWord;
         if( halftoneBits != 0 )
         {
             halftoneWord = halftoneBits->wordAt( 1 + ( dy & 15 ) );
             dy = dy + vDir;
         }else
             halftoneWord = AllOnes;
-        quint16 skewWord = halftoneWord;
-        quint16 prevWord, thisWord;
+        skewWord = halftoneWord;
         if( preload && sourceBits != 0 )
         {
             prevWord = sourceBits->wordAt( sourceIndex + 1 );
             sourceIndex = sourceIndex + hDir;
         }else
             prevWord = 0;
-        quint16 mergeMask = mask1;
-        for( quint16 word = 1; word <= nWords; word++ )
+        mergeMask = mask1;
+        for( word = 1; word <= nWords; word++ )
         {
             if( sourceBits != 0 )
             {
-                prevWord = prevWord & skewWord;
+                prevWord = prevWord & skewMask;
                 thisWord = sourceBits->wordAt( sourceIndex + 1 );
                 skewWord = prevWord | ( thisWord & ~skewMask );
                 prevWord = thisWord;
                 skewWord = shiftLeft( skewWord, skew ) | shiftLeft( skewWord, skew - 16 );
             }
-            quint16 mergeWord = merge( skewWord & halftoneWord, destBits->wordAt( destIndex + 1 ) );
+            mergeWord = merge( skewWord & halftoneWord, destBits->wordAt( destIndex + 1 ) );
             destBits->wordAtPut( destIndex + 1, ( mergeMask & mergeWord ) |
                                  ( ~mergeMask & destBits->wordAt( destIndex + 1 ) ) );
             sourceIndex = sourceIndex + hDir;

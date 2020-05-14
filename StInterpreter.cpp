@@ -87,6 +87,7 @@ static Bitmap fetchBitmap( ObjectMemory2* memory, Interpreter::OOP form )
     quint16 height = memory->integerValueOf(memory->fetchWordOfObject(2,form));
     // Q_ASSERT( memory->fetchByteLenghtOf(bitmap) == width * height / 8 );
     ObjectMemory2::ByteString bs = memory->fetchByteString(bitmap);
+    Q_ASSERT( bs.d_bytes != 0 );
     return Bitmap( const_cast<quint8*>(bs.d_bytes), bs.getWordLen(), width, height );
 }
 
@@ -246,6 +247,7 @@ bool Interpreter::lookupMethodInDictionary(Interpreter::OOP dictionary)
     OOP messageSelector = memory->getRegister(MessageSelector);
 
     // Just a trivial linear scan; not the more fancy hash lookup described in the Blue Book
+    // TODO: currently the most expensive method, switch to BB implementation
     const int SelectorStart = 2;
     const int MethodArrayIndex = 1;
     int length = memory->fetchWordLenghtOf(dictionary);

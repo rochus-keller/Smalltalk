@@ -28,16 +28,21 @@ namespace St
     class Bitmap
     {
     public:
+        enum { PixPerByte = 8, PixPerWord = PixPerByte * 2 };
         Bitmap():d_buf(0),d_wordLen(0) {}
         Bitmap( quint8* buf, quint16 wordLen, quint16 pixWidth, quint16 pixHeight );
-        bool testBit( quint16 x, quint16 y ) const;
-        quint16 width() const { return d_width; }
-        quint16 height() const { return d_height; }
+        const quint8* scanLine(int y) const
+        {
+            return d_buf + ( y * d_pixLineWidth / PixPerByte );
+        }
+        quint16 lineWidth() const { return d_pixLineWidth; }
+        quint16 width() const { return d_pixWidth; }
+        quint16 height() const { return d_pixHeight; }
         quint16 wordAt(quint16 i ) const;
         void wordAtPut( quint16 i, quint16 v );
         bool isNull() const { return d_buf == 0; }
     private:
-        quint16 d_width, d_height, d_lineWidth, d_wordLen;
+        quint16 d_pixWidth, d_pixHeight, d_pixLineWidth, d_wordLen;
         quint8* d_buf;
     };
 
@@ -55,6 +60,7 @@ namespace St
 
     private:
         Bitmap d_bitmap;
+        QImage d_img;
     };
 
     class BitBlt
