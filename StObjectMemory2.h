@@ -162,10 +162,11 @@ namespace St
 
         static bool isPointer(OOP);
         static bool isIntegerObject(OOP objectPointer);
-        static qint16 integerValueOf(OOP objectPointer );
+        static qint16 integerValueOf(OOP objectPointer , bool doAssert = false);
         static OOP integerObjectOf(qint16 value );
         static bool isIntegerValue(int);
         int largeIntegerValueOf(OOP integerPointer) const;
+        static inline qint16 bitShift( qint16 wordToShift, qint16 offset );
 
     protected:
         int findFreeSlot();
@@ -195,7 +196,7 @@ namespace St
         {
             quint32 d_size : 15; // number of words (16 bit per word)
             quint32 d_isOdd : 1;
-            quint32 d_class : 15;
+            quint32 d_class : 15; // NOTE: this is an index, not an OOP!
             quint32 d_isPtr : 1;
             Object* d_obj;
             OtSlot():d_obj(0),d_size(0),d_isOdd(0),d_class(0),d_isPtr(0) {}
@@ -221,7 +222,7 @@ namespace St
         Xref d_xref;
     };
 
-    const ObjectMemory2::OtSlot&ObjectMemory2::getSlot(ObjectMemory2::OOP oop) const
+    const ObjectMemory2::OtSlot& ObjectMemory2::getSlot(ObjectMemory2::OOP oop) const
     {
         const quint32 i = oop >> 1;
         Q_ASSERT( i < d_ot.d_slots.size() );
@@ -233,7 +234,11 @@ namespace St
         const OtSlot& s = getSlot(objectPointer);
         const quint32 off = fieldIndex * 2;
         Q_ASSERT( ( off + 1 ) < s.byteLen() ); // removed isPtr check
-        return readU16( s.d_obj->d_data, off );
+        const OOP oop = readU16( s.d_obj->d_data, off );
+        if( oop == 0 ) // BB (implicitly?) assumes that unused members are nil
+            return objectNil;
+        else
+            return oop;
     }
 
     quint16 ObjectMemory2::getRegister(quint8 index) const
@@ -242,6 +247,38 @@ namespace St
             return d_registers[index];
         else
             return 0;
+    }
+
+    qint16 ObjectMemory2::bitShift(qint16 wordToShift, qint16 offset)
+    {
+        if( offset >= 0 )
+            return wordToShift << offset;
+        else
+        {
+            offset = -offset;
+            if( wordToShift < 0 )
+            {
+                // BB: the sign bit is extended in right shifts
+                // see also https://stackoverflow.com/questions/1857928/right-shifting-negative-numbers-in-c
+                // and https://stackoverflow.com/questions/31879878/how-can-i-perform-arithmetic-right-shift-in-c-in-a-portable-way
+                quint16 tmp = wordToShift;
+#if 0
+                for( int i = 0; i < offset; i++ )
+                {
+                    tmp >>= 1;
+                    tmp |= 0x8000;
+                }
+#else
+                const quint16 tmp2 = -((wordToShift & (1u << 15)) >> offset);
+                tmp = tmp >> offset | tmp2;
+//              qDebug() << "before" << QByteArray::number(quint16(wordToShift),2)
+//                     << "after" << QByteArray::number(tmp,2)
+//                     << "tmp2" << QByteArray::number(tmp2,2);
+#endif
+                return tmp;
+            }else
+                return wordToShift >> offset;
+        }
     }
 }
 

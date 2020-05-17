@@ -55,7 +55,7 @@ using namespace St;
 #define ST_RETURN_BYTECODE(msg)
 #endif
 
-Interpreter::Interpreter(QObject* p):QObject(p),memory(0),stackPointer(0),instructionPointer(0),d_run(false),
+Interpreter::Interpreter(QObject* p):QObject(p),memory(0),stackPointer(0),instructionPointer(0),
     semaphoreIndex(0), newProcessWaiting(false),cycleNr(0), level(0)
 {
 
@@ -83,8 +83,8 @@ static Bitmap fetchBitmap( ObjectMemory2* memory, Interpreter::OOP form )
     if( form == ObjectMemory2::objectNil )
         return Bitmap();
     Interpreter::OOP bitmap = memory->fetchWordOfObject(0,form);
-    quint16 width = memory->integerValueOf(memory->fetchWordOfObject(1,form));
-    quint16 height = memory->integerValueOf(memory->fetchWordOfObject(2,form));
+    qint16 width = memory->integerValueOf(memory->fetchWordOfObject(1,form));
+    qint16 height = memory->integerValueOf(memory->fetchWordOfObject(2,form));
     // Q_ASSERT( memory->fetchByteLenghtOf(bitmap) == width * height / 8 );
     ObjectMemory2::ByteString bs = memory->fetchByteString(bitmap);
     Q_ASSERT( bs.d_bytes != 0 );
@@ -105,7 +105,6 @@ void Interpreter::setOm(ObjectMemory2* om)
 
 void Interpreter::interpret()
 {
-    d_run = true;
     cycleNr = 0;
     level = 0;
     newActiveContext( firstContext() ); // BB: When Smalltalk is started up, ...
@@ -117,7 +116,7 @@ void Interpreter::interpret()
     //     ->quit->saveAs:thenQuit:->snapshotAs:thenQuit:
     // top: BlockContext->newProcess, ControllManager->activeController:
 
-    while( d_run ) // && cycleNr < 2000 ) // TEST trace2 < 500 trace3 < 2000
+    while( Display::s_run ) // && cycleNr < 2000 ) // TEST trace2 < 500 trace3 < 2000
     {
         // TODO: runs until "[cycle=269451] <a Semaphore> 8d8e wait" and stays there
         cycle();
@@ -127,33 +126,33 @@ void Interpreter::interpret()
 
 qint16 Interpreter::instructionPointerOfContext(Interpreter::OOP contextPointer)
 {
-    return ObjectMemory2::integerValueOf(memory->fetchWordOfObject(InstructionPointerIndex,contextPointer));
+    return fetchIntegerOfObject(InstructionPointerIndex, contextPointer );
 }
 
 void Interpreter::storeInstructionPointerValueInContext(qint16 value, Interpreter::OOP contextPointer)
 {
-    memory->storeWordOfObject( InstructionPointerIndex, contextPointer, ObjectMemory2::integerObjectOf(value) );
+    storeIntegerOfObjectWithValue( InstructionPointerIndex, contextPointer, value );
 }
 
 qint16 Interpreter::stackPointerOfContext(Interpreter::OOP contextPointer)
 {
-    return ObjectMemory2::integerValueOf(memory->fetchWordOfObject(StackPointerIndex,contextPointer));
+    return fetchIntegerOfObject( StackPointerIndex, contextPointer );
 }
 
 void Interpreter::storeStackPointerValueInContext(qint16 value, Interpreter::OOP contextPointer)
 {
-    memory->storeWordOfObject( StackPointerIndex, contextPointer, ObjectMemory2::integerObjectOf(value) );
+    storeIntegerOfObjectWithValue( StackPointerIndex, contextPointer, value );
 }
 
 qint16 Interpreter::argumentCountOfBlock(Interpreter::OOP blockPointer)
 {
-    return ObjectMemory2::integerValueOf(memory->fetchWordOfObject(BlockArgumentCountIndex,blockPointer));
+    return fetchIntegerOfObject( BlockArgumentCountIndex, blockPointer );
 }
 
 bool Interpreter::isBlockContext(Interpreter::OOP contextPointer)
 {
-    const OOP methodOrArguments = memory->fetchWordOfObject(MethodIndex, contextPointer);
-    return ObjectMemory2::isIntegerObject(methodOrArguments);
+    const OOP methodOrArguments = memory->fetchPointerOfObject(MethodIndex, contextPointer);
+    return memory->isIntegerObject(methodOrArguments);
 }
 
 void Interpreter::fetchContextRegisters()
@@ -174,17 +173,22 @@ void Interpreter::fetchContextRegisters()
 void Interpreter::storeContextRegisters()
 {
     OOP activeContext = memory->getRegister(ActiveContext);
-    if( activeContext )
+    if( activeContext ) // deviation from BB since activeContext is null on first call
     {
         storeInstructionPointerValueInContext( instructionPointer + 1, activeContext );
         storeStackPointerValueInContext( stackPointer - TempFrameStart + 1, activeContext );
     }
 }
 
-void Interpreter::push(Interpreter::OOP value)
+void Interpreter::push(Interpreter::OOP object)
 {
+    if( object == 0 )
+    {
+        qWarning() << "WARNING: pushing zero oop to stack, replaced by nil";
+        object = ObjectMemory2::objectNil;
+    }
     stackPointer++;
-    memory->storePointerOfObject( stackPointer, memory->getRegister(ActiveContext), value);
+    memory->storePointerOfObject( stackPointer, memory->getRegister(ActiveContext), object);
 }
 
 Interpreter::OOP Interpreter::popStack()
@@ -218,7 +222,9 @@ void Interpreter::newActiveContext(Interpreter::OOP aContext)
 {
     Q_ASSERT( aContext );
     storeContextRegisters();
+    // decreaseReferencesTo: activeContext
     memory->setRegister(ActiveContext, aContext);
+    // increaseReferencesTo: activeContext
     fetchContextRegisters();
 }
 
@@ -229,7 +235,7 @@ Interpreter::OOP Interpreter::sender()
 
 Interpreter::OOP Interpreter::caller()
 {
-    return memory->fetchPointerOfObject(CallerIndex, memory->getRegister(ActiveContext) );
+    return memory->fetchPointerOfObject(CallerIndex, memory->getRegister(ActiveContext) ); // BB states SenderIndex instead
 }
 
 Interpreter::OOP Interpreter::temporary(qint16 offset)
@@ -247,7 +253,7 @@ bool Interpreter::lookupMethodInDictionary(Interpreter::OOP dictionary)
     OOP messageSelector = memory->getRegister(MessageSelector);
 
     // Just a trivial linear scan; not the more fancy hash lookup described in the Blue Book
-    // TODO: currently the most expensive method, switch to BB implementation
+    // TODO: currently the most expensive Interpreter method, switch to BB implementation
     const int SelectorStart = 2;
     const int MethodArrayIndex = 1;
     int length = memory->fetchWordLenghtOf(dictionary);
@@ -293,32 +299,37 @@ bool Interpreter::lookupMethodInClass(Interpreter::OOP cls)
 
 Interpreter::OOP Interpreter::superclassOf(Interpreter::OOP cls)
 {
+    if( cls == ObjectMemory2::objectNil )
+    {
+        qWarning() << "WARNING: asking for superclass of nil";
+        return cls;
+    }
     return memory->fetchPointerOfObject(SuperClassIndex,cls);
 }
 
-Interpreter::OOP Interpreter::instanceSpecificationOf(Interpreter::OOP cls)
+Interpreter::OOP Interpreter::instanceSpecificationOf(Interpreter::OOP classPointer)
 {
-    return memory->fetchPointerOfObject(InstanceSpecIndex,cls);
+    return memory->fetchPointerOfObject(InstanceSpecIndex,classPointer);
 }
 
-bool Interpreter::isPointers(Interpreter::OOP cls)
+bool Interpreter::isPointers(Interpreter::OOP classPointer)
 {
-    return instanceSpecificationOf(cls) & 0x8000;
+    return instanceSpecificationOf(classPointer) & 0x8000;
 }
 
-bool Interpreter::isWords(Interpreter::OOP cls)
+bool Interpreter::isWords(Interpreter::OOP classPointer)
 {
-    return instanceSpecificationOf(cls) & 0x4000;
+    return instanceSpecificationOf(classPointer) & 0x4000;
 }
 
-bool Interpreter::isIndexable(Interpreter::OOP cls)
+bool Interpreter::isIndexable(Interpreter::OOP classPointer)
 {
-    return instanceSpecificationOf(cls) & 0x2000;
+    return instanceSpecificationOf(classPointer) & 0x2000;
 }
 
-qint16 Interpreter::fixedFieldsOf(Interpreter::OOP cls)
+qint16 Interpreter::fixedFieldsOf(Interpreter::OOP classPointer)
 {
-    return ( ( instanceSpecificationOf(cls) >> 1 ) & 0x7ff );
+    return ( ( instanceSpecificationOf(classPointer) >> 1 ) & 0x7ff );
 }
 
 quint8 Interpreter::fetchByte()
@@ -463,8 +474,9 @@ bool Interpreter::jumpBytecode()
 
 bool Interpreter::pushReceiverVariableBytecode()
 {
-    ST_TRACE_BYTECODE("");
-    push( memory->fetchPointerOfObject( currentBytecode & 0xf, memory->getRegister(Receiver) ) );
+    OOP receiver = memory->getRegister(Receiver);
+    ST_TRACE_BYTECODE("receiver" << memory->prettyValue(val).constData());
+    push( memory->fetchPointerOfObject( currentBytecode & 0xf, receiver ) );
     // "Push Receiver Variable #%1").arg( b & 0xf ), 1 );
     return true;
 }
@@ -590,7 +602,9 @@ bool Interpreter::extendedPushBytecode()
 bool Interpreter::extendedStoreBytecode(bool subcall)
 {
     if( !subcall )
+    {
         ST_TRACE_BYTECODE("");
+    }
     // "Store (Receiver Variable, Temporary Location, Illegal, Literal Variable) [%1] #%2").
                               // arg( ( bc[pc+1] >> 6 ) & 0x3 ).arg( bc[pc+1] & 0x3f), 2 );
     const quint16 descriptor = fetchByte();
@@ -629,7 +643,9 @@ bool Interpreter::extendedStoreAndPopBytecode()
 bool Interpreter::popStackBytecode(bool subcall)
 {
     if( !subcall )
+    {
         ST_TRACE_BYTECODE("");
+    }
     // "Pop Stack Top" ), 1 );
     popStack();
     return true;
@@ -739,7 +755,8 @@ bool Interpreter::singleExtendedSuperBytecode()
     argumentCount = ( descriptor >> 5 ) & 0x7;
     const quint16 selectorIndex = descriptor & 0x1f;
     memory->setRegister( MessageSelector, literal( selectorIndex ));
-    OOP methodClass = memory->methodClassOf( memory->getRegister(Method) );
+    OOP method = memory->getRegister(Method);
+    OOP methodClass = memory->methodClassOf( method );
     sendSelectorToClass( superclassOf(methodClass) );
     return true;
 }
@@ -776,8 +793,8 @@ bool Interpreter::sendLiteralSelectorBytecode()
     // "Send Literal Selector #%1 With No Arguments" ).arg( b & 0xf ), 1 );
     // "Send Literal Selector #%1 With 1 Argument" ).arg( b & 0xf ), 1 );
     // "Send Literal Selector #%1 With 2 Arguments" ).arg( b & 0xf ), 1 );
-    int args = ( ( currentBytecode >> 4 ) & 0x3 ) - 1;
     OOP selector = literal( currentBytecode & 0xf );
+    int args = ( ( currentBytecode >> 4 ) & 0x3 ) - 1;
     ST_TRACE_BYTECODE( "literal" << ( currentBytecode & 0xf ) << memory->prettyValue(selector).constData() << "args" << args);
     sendSelector( selector, args );
     return true;
@@ -805,15 +822,19 @@ void Interpreter::sendSelector(Interpreter::OOP selector, quint16 count)
     memory->setRegister(MessageSelector, selector );
     argumentCount = count;
     OOP newReceiver = stackValue(argumentCount);
-    if( newReceiver )
+    if( newReceiver ) // deviation from BB
         sendSelectorToClass( memory->fetchClassOf(newReceiver) );
     else
-        qCritical() << "ERROR: sendSelector" << memory->fetchByteArray(selector) << "to zero receiver";
+    {
+        qCritical() << "ERROR: sendSelector" << memory->fetchByteArray(selector) <<
+                       "to zero receiver at stack slot" << stackPointer - count;
+        dumpStack_("sendSelector");
+    }
 }
 
 void Interpreter::sendSelectorToClass(Interpreter::OOP classPointer)
 {
-    // original: findNewMethodInClass
+    // deviation from BB, we currently don't have a methodCache, original: findNewMethodInClass
     lookupMethodInClass(classPointer);
     executeNewMethod();
 }
@@ -858,12 +879,12 @@ void Interpreter::activateNewMethod()
     else
         contextSize += 12;
     OOP newContext = memory->instantiateClassWithPointers(ObjectMemory2::classMethodContext,contextSize);
-    memory->storePointerOfObject(SenderIndex, newContext, memory->getRegister(ActiveContext) );
+    OOP activeContext = memory->getRegister(ActiveContext);
+    memory->storePointerOfObject(SenderIndex, newContext, activeContext );
     storeInstructionPointerValueInContext( memory->initialInstructionPointerOfMethod( newMethod ), newContext );
     storeStackPointerValueInContext( memory->temporaryCountOf( newMethod ), newContext );
     memory->storePointerOfObject(MethodIndex,newContext,newMethod);
-    transfer( argumentCount + 1, stackPointer - argumentCount, memory->getRegister(ActiveContext),
-              ReceiverIndex, newContext );
+    transfer( argumentCount + 1, stackPointer - argumentCount, activeContext, ReceiverIndex, newContext );
     pop( argumentCount + 1 );
     newActiveContext(newContext);
 }
@@ -901,18 +922,19 @@ void Interpreter::nilContextFields()
 
 void Interpreter::returnToActiveContext(Interpreter::OOP aContext)
 {
-    memory->addTemp(aContext);
+    memory->addTemp(aContext); // increaseReferencesTo: aContext
     nilContextFields();
-    memory->removeTemp(aContext);
     memory->setRegister(ActiveContext,aContext);
+    memory->removeTemp(aContext); // decreaseReferencesTo: activeContext
     fetchContextRegisters();
 }
 
 void Interpreter::returnValue(Interpreter::OOP resultPointer, Interpreter::OOP contextPointer)
 {
-    OOP active = memory->getRegister(ActiveContext);
+    OOP activeContext = memory->getRegister(ActiveContext);
+
     ST_RETURN_BYTECODE(memory->prettyValue(resultPointer).constData() << "from" <<
-                       memory->prettyValue(active).constData());
+                       memory->prettyValue(activeContext).constData());
 
 #ifdef ST_DO_TRACING
     if( memory->fetchClassOf(active) != ObjectMemory2::classBlockContext )
@@ -921,21 +943,21 @@ void Interpreter::returnValue(Interpreter::OOP resultPointer, Interpreter::OOP c
 
     if( contextPointer == ObjectMemory2::objectNil )
     {
-        push( active );
+        push( activeContext );
         push( resultPointer );
         sendSelector(ObjectMemory2::symbolCannotReturn, 1 );
     }
     OOP sendersIP = memory->fetchPointerOfObject( InstructionPointerIndex, contextPointer );
     if( sendersIP == ObjectMemory2::objectNil )
     {
-        push( active );
+        push( activeContext );
         push( resultPointer );
         sendSelector(ObjectMemory2::symbolCannotReturn, 1 );
     }
-    memory->addTemp(resultPointer);
+    memory->addTemp(resultPointer); // increaseReferencesTo: resultPointer
     returnToActiveContext(contextPointer);
     push( resultPointer );
-    memory->removeTemp(resultPointer);
+    memory->removeTemp(resultPointer); // decreaseReferencesTo: resultPointer
 }
 
 void Interpreter::initPrimitive()
@@ -964,9 +986,9 @@ qint16 Interpreter::popInteger()
         return 0;
 }
 
-void Interpreter::pushInteger(qint16 i)
+void Interpreter::pushInteger(qint16 integerValue)
 {
-    push( memory->integerObjectOf(i));
+    push( memory->integerObjectOf(integerValue));
 }
 
 Interpreter::OOP Interpreter::positive16BitIntegerFor(int integerValue)
@@ -1203,11 +1225,7 @@ void Interpreter::primitiveBitShift()
     qint16 integerResult = 0;
     if( success )
     {
-        Q_ASSERT( integerReceiver >= 0 );
-        if( integerArgument >= 0 ) // TODO: check
-            integerResult = integerReceiver << integerArgument;
-        else
-            integerResult = integerReceiver >> -integerArgument;
+        integerResult = ObjectMemory2::bitShift( integerReceiver, integerArgument );
         successUpdate( memory->isIntegerValue(integerResult) );
     }
     if( success )
@@ -2482,7 +2500,7 @@ void Interpreter::suspendActive()
 
 void Interpreter::primitiveQuit()
 {
-    qApp->quit();
+    Display::s_run = false;
     // Display::inst()->close();
 }
 
@@ -2547,17 +2565,17 @@ void Interpreter::primitiveCopyBits()
     if( !halftoneBits.isNull() )
         in.halftoneBits = &halftoneBits;
 
-    in.combinationRule = memory->largeIntegerValueOf( memory->fetchPointerOfObject(3,bitblt) );
-    in.destX = memory->largeIntegerValueOf( memory->fetchPointerOfObject(4,bitblt) );
-    in.destY = memory->largeIntegerValueOf( memory->fetchPointerOfObject(5,bitblt) );
-    in.width = memory->largeIntegerValueOf( memory->fetchPointerOfObject(6,bitblt) );
-    in.height = memory->largeIntegerValueOf( memory->fetchPointerOfObject(7,bitblt) );
-    in.sourceX = memory->largeIntegerValueOf( memory->fetchPointerOfObject(8,bitblt) );
-    in.sourceY = memory->largeIntegerValueOf( memory->fetchPointerOfObject(9,bitblt) );
-    in.clipX = memory->largeIntegerValueOf( memory->fetchPointerOfObject(10,bitblt) );
-    in.clipY = memory->largeIntegerValueOf( memory->fetchPointerOfObject(11,bitblt) );
-    in.clipWidth = memory->largeIntegerValueOf( memory->fetchPointerOfObject(12,bitblt) );
-    in.clipHeight = memory->largeIntegerValueOf( memory->fetchPointerOfObject(13,bitblt) );
+    in.combinationRule = memory->integerValueOf( memory->fetchPointerOfObject(3,bitblt), true );
+    in.destX = memory->integerValueOf( memory->fetchPointerOfObject(4,bitblt), true );
+    in.destY = memory->integerValueOf( memory->fetchPointerOfObject(5,bitblt), true );
+    in.width = memory->integerValueOf( memory->fetchPointerOfObject(6,bitblt), true );
+    in.height = memory->integerValueOf( memory->fetchPointerOfObject(7,bitblt), true );
+    in.sourceX = memory->integerValueOf( memory->fetchPointerOfObject(8,bitblt), true );
+    in.sourceY = memory->integerValueOf( memory->fetchPointerOfObject(9,bitblt), true );
+    in.clipX = memory->integerValueOf( memory->fetchPointerOfObject(10,bitblt), true );
+    in.clipY = memory->integerValueOf( memory->fetchPointerOfObject(11,bitblt), true );
+    in.clipWidth = memory->integerValueOf( memory->fetchPointerOfObject(12,bitblt), true );
+    in.clipHeight = memory->integerValueOf( memory->fetchPointerOfObject(13,bitblt), true );
 
     BitBlt bb( in );
     bb.copyBits();
@@ -2588,17 +2606,17 @@ void Interpreter::dumpStack_(const char* title)
 
 void Interpreter::primitiveBeCursor()
 {
-    //dumpStack_("primitiveBeCursor");
-    pop(1); // cursor instance
-    qWarning() << "WARNING: primitiveBeCursor not yet implemented";
+    OOP cursor = stackValue(0);
 
+    Display::inst()->setCursorBitmap( fetchBitmap(memory, cursor ) );
+
+    pop(1); // cursor instance
 }
 
 void Interpreter::primitiveCursorLink()
 {
-    //dumpStack_("primitiveCursorLink");
+    qWarning() << "WARNING: primitiveCursorLink not supported" << memory->prettyValue(stackTop());
     pop(1); // bool
-    qWarning() << "WARNING: primitiveCursorLink not yet implemented";
 }
 
 void Interpreter::primitiveQuo()

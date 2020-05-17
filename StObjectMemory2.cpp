@@ -21,6 +21,7 @@
 #include <QIODevice>
 #include <QtDebug>
 #include <QtMath>
+#include <limits.h>
 using namespace St;
 
 // According to "Smalltalk-80: Virtual Image Version 2", Xerox PARC, 1983
@@ -253,7 +254,7 @@ ObjectMemory2::OOP ObjectMemory2::getNextInstance(ObjectMemory2::OOP cls, Object
     {
         if( d_ot.d_slots[i].isFree() )
             continue;
-        if( d_ot.d_slots[i].d_class == cls )
+        if( d_ot.d_slots[i].getClass() == cls )
             return i << 1;
     }
     return 0;
@@ -289,6 +290,8 @@ QByteArray ObjectMemory2::prettyValue(ObjectMemory2::OOP oop) const
         return "specialSelectors";
     case characterTable:
         return "characterTable";
+    case 0:
+        return "<invalid oop>";
     }
     OOP cls = fetchClassOf(oop);
     switch( cls )
@@ -319,6 +322,8 @@ QByteArray ObjectMemory2::prettyValue(ObjectMemory2::OOP oop) const
         }
     case classSymbol:
         return "#" + fetchByteArray(oop);
+    case 0:
+        return "<instance" + QByteArray::number(oop,16) + "with invalid class oop>";
     }
     return "<a " + fetchClassName(cls) + ">";
 }
@@ -491,6 +496,7 @@ bool ObjectMemory2::hasObject(OOP ptr) const
 
 QByteArray ObjectMemory2::fetchClassName(OOP classPointer) const
 {
+    Q_ASSERT( classPointer != 0 );
     if( d_classes.contains(classPointer) )
     {
         const quint16 sym = fetchPointerOfObject(6, classPointer);
@@ -506,7 +512,14 @@ QByteArray ObjectMemory2::fetchClassName(OOP classPointer) const
         //Q_ASSERT( fetchClassOf(sym) == classSymbol );
         const ByteString bs = fetchByteString(sym);
         return QByteArray((const char*)bs.d_bytes) + " class";
+    }else if( d_objects.contains(classPointer) )
+    {
+        OOP cls = fetchClassOf(classPointer);
+        qWarning() << "WARNING: fetchClassName oop" << QByteArray::number(classPointer,16).constData() <<
+                      "is an instance of" << fetchClassName(cls);
+        return "not a class";
     }
+    Q_ASSERT( false );
     return QByteArray();
 }
 
@@ -619,7 +632,7 @@ bool ObjectMemory2::isIntegerObject(ObjectMemory2::OOP objectPointer)
     return isInt(objectPointer);
 }
 
-qint16 ObjectMemory2::integerValueOf(OOP objectPointer)
+qint16 ObjectMemory2::integerValueOf(OOP objectPointer, bool doAssert)
 {
     if( isInt(objectPointer) )
     {
@@ -630,7 +643,9 @@ qint16 ObjectMemory2::integerValueOf(OOP objectPointer)
             return res;
         }else
             return tcomp;
-    }else
+    }else if( doAssert )
+        Q_ASSERT( false );
+    else
         return 0;
 }
 
@@ -752,12 +767,14 @@ void ObjectMemory2::collectGarbage()
         if( !s.d_obj->d_flags.test(Object::Marked) )
         {
             d_ot.free(i);
+            d_freeSlots.enqueue(i);
             count++;
         }else
             s.d_obj->d_flags.set(Object::Marked, false);
     }
 
-    qDebug() << "collectGarbage freed oop:" << count;
+    Q_ASSERT( count == d_freeSlots.size() );
+    qDebug() << "INFO: collectGarbage" << count << "oop available" << int( count * 100 / d_ot.d_slots.size() ) << "%";
 }
 
 void ObjectMemory2::mark(OOP oop)
@@ -781,7 +798,7 @@ void ObjectMemory2::mark(OOP oop)
             if( isPointer(sub) )
                 mark( sub );
         }
-    }else if( s.d_class == classCompiledMethod )
+    }else if( s.getClass() == classCompiledMethod )
     {
         const quint16 len = literalCountOf(oop);
         for( int i = 0; i < len; i++ )

@@ -17,23 +17,28 @@
 * http://www.gnu.org/copyleft/gpl.html.
 */
 #include "StDisplay.h"
-
+#include "StObjectMemory2.h"
 #include <QFile>
 #include <QPainter>
 #include <stdint.h>
 #include <QtDebug>
+#include <QBitmap>
+#include <QMessageBox>
+#include <QApplication>
+#include <QCloseEvent>
 using namespace St;
 
 static Display* s_inst = 0;
+bool Display::s_run = true;
 
 Display::Display(QWidget *parent) : QWidget(parent)
 {
-    setAttribute(Qt::WA_DeleteOnClose);
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setCursor(Qt::BlankCursor);
+    setWindowTitle( renderTitle() );
     show();
-    startTimer(100); // 20ms according to BB
+    startTimer(30); // 20ms according to BB
 }
 
 Display*Display::inst()
@@ -49,6 +54,21 @@ void Display::setBitmap(const Bitmap& buf)
     d_img = QImage( d_bitmap.width(), d_bitmap.height(), QImage::Format_Mono );
     setFixedSize( buf.width(), buf.height() );
     update();
+}
+
+void Display::setCursorBitmap(const Bitmap& bm)
+{
+    QImage img( bm.width(), bm.height(), QImage::Format_Mono );
+    const int lw = bm.lineWidth() / 8;
+    for( int y = 0; y < bm.height(); y++ )
+    {
+        uchar* dest = img.scanLine(y);
+        const quint8* src = bm.scanLine(y);
+        for( int x = 0; x < lw; x++ )
+            dest[x] = ~src[x];
+    }
+    QBitmap pix = QPixmap::fromImage(img);
+    setCursor( QCursor( pix, pix, 0, 0 ) );
 }
 
 void Display::paintEvent(QPaintEvent*)
@@ -91,15 +111,32 @@ void Display::timerEvent(QTimerEvent*)
     update();
 }
 
-Bitmap::Bitmap(quint8* buf, quint16 wordLen, quint16 pixWidth, quint16 pixHeight)
+void Display::closeEvent(QCloseEvent* event)
+{
+    event->ignore();
+    const int res = QMessageBox::warning(this, renderTitle(), tr("Do you really want to close the VM? Changes are lost!"),
+                                         QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Cancel );
+    if( res == QMessageBox::Ok )
+        s_run = false;
+}
+
+QString Display::renderTitle() const
+{
+    return QString("%1 v%2").arg( QApplication::applicationName() ).arg( QApplication::applicationVersion() );
+}
+
+Bitmap::Bitmap(quint8* buf, qint16 wordLen, qint16 pixWidth, qint16 pixHeight)
 {
     d_buf = buf;
-    // Q_ASSERT( wordLen == pixWidth * pixHeight / 16 ); // empirically found
-    // Q_ASSERT( d_width >= 16 && d_height >= 16 ); // empirically found
+    // Q_ASSERT( wordLen == pixWidth * pixHeight / 16 ); // empirically found to be true
+    // Q_ASSERT( d_width >= 16 && d_height >= 16 ); // empirically found to be true
+    Q_ASSERT( wordLen >= 0 && pixWidth >= 0 && pixHeight >= 0 );
     d_wordLen = wordLen;
     d_pixWidth = pixWidth;
     d_pixHeight = pixHeight;
     d_pixLineWidth = ( ( d_pixWidth + PixPerWord - 1 ) / PixPerWord ) * PixPerWord; // line width is a multiple of 16
+    // d_pixWidth != d_pixLineWidth happens twice
+    Q_ASSERT( d_pixLineWidth * d_pixHeight / 16 == d_wordLen );
 }
 
 static inline quint16 readU16( const quint8* data, int off )
@@ -107,12 +144,13 @@ static inline quint16 readU16( const quint8* data, int off )
     return ( quint8(data[off]) << 8 ) + quint8(data[off+1] );
 }
 
-quint16 Bitmap::wordAt(quint16 i) const
+qint16 Bitmap::wordAt(qint16 i) const
 {
     i--; // Smalltalk array indexes start with 1
-    if( i >= d_wordLen )
+    if( i < 0 || i >= d_wordLen )
     {
-        qCritical() << "ERROR: Bitmap::wordAt" << d_pixWidth << d_pixHeight << d_wordLen << "out of bounds" << i;
+        // this happens five times, always in BitBlt::copyLoop
+        qCritical() << "ERROR: Bitmap::wordAt width" << d_pixWidth << "height" << d_pixHeight << "wordlen" << d_wordLen << "out of bounds" << i;
         return 0;
     }
     Q_ASSERT( i < d_wordLen );
@@ -125,9 +163,9 @@ static inline void writeU16( quint8* data, int off, quint16 val )
     data[off+1] = val & 0xff;
 }
 
-void Bitmap::wordAtPut(quint16 i, quint16 v)
+void Bitmap::wordAtPut(qint16 i, qint16 v)
 {
-    Q_ASSERT( i <= d_wordLen );
+    Q_ASSERT( i > 0 && i <= d_wordLen );
     i--;
     writeU16( d_buf, i * 2, v );
 }
@@ -207,9 +245,9 @@ void BitBlt::computeMasks()
         sourceRaster = ( ( sourceBits->width() - 1 ) / 16 ) + 1;
     // halftoneBits = halftoneForm bits
     skew = ( sx - dx ) & 15;
-    quint16 startBits = 16 - ( dx & 15 );
+    qint16 startBits = 16 - ( dx & 15 );
     mask1 = RightMasks[ startBits /* + 1 */ ]; // ST array index starts with 1
-    quint16 endBits = 15 - ( ( dx + w - 1 ) & 15 );
+    qint16 endBits = 15 - ( ( dx + w - 1 ) & 15 );
     mask2 = ~RightMasks[ endBits /* + 1 */ ];
     skewMask = skew == 0 ? 0 : RightMasks[ 16 - skew /* + 1 */ ];
     if( w < startBits )
@@ -237,7 +275,7 @@ void BitBlt::checkOverlap()
             sx = sx + w - 1;
             dx = dx + w - 1;
             skewMask = ~skewMask;
-            int t = mask1;
+            qint16 t = mask1;
             mask1 = mask2;
             mask2 = t;
         }
@@ -255,18 +293,9 @@ void BitBlt::calculateOffsets()
     destDelta = ( destRaster * vDir ) - ( nWords * hDir );
 }
 
-static inline qint16 shiftLeft( qint16 v, qint16 n )
-{
-    // TODO Q_ASSERT( v >= 0 );
-    if( n >= 0 )
-        return v << n;
-    else
-        return v >> -n;
-}
-
 void BitBlt::copyLoop()
 {
-    int prevWord, thisWord, skewWord, mergeMask,
+    qint16 prevWord, thisWord, skewWord, mergeMask,
             halftoneWord, mergeWord, word;
     for( int i = 1; i <= h; i++ )
     {
@@ -292,7 +321,7 @@ void BitBlt::copyLoop()
                 thisWord = sourceBits->wordAt( sourceIndex + 1 );
                 skewWord = prevWord | ( thisWord & ~skewMask );
                 prevWord = thisWord;
-                skewWord = shiftLeft( skewWord, skew ) | shiftLeft( skewWord, skew - 16 );
+                skewWord = ObjectMemory2::bitShift( skewWord, skew ) | ObjectMemory2::bitShift( skewWord, skew - 16 );
             }
             mergeWord = merge( skewWord & halftoneWord, destBits->wordAt( destIndex + 1 ) );
             destBits->wordAtPut( destIndex + 1, ( mergeMask & mergeWord ) |
@@ -309,7 +338,7 @@ void BitBlt::copyLoop()
     }
 }
 
-quint16 BitBlt::merge(quint16 source, quint16 destination)
+qint16 BitBlt::merge(qint16 source, qint16 destination)
 {
     switch( combinationRule )
     {
@@ -349,10 +378,10 @@ quint16 BitBlt::merge(quint16 source, quint16 destination)
     return 0;
 }
 
-const QList<quint16> BitBlt::RightMasks = QList<quint16>() <<
+const QList<qint16> BitBlt::RightMasks = QList<qint16>() <<
     0 << 0x1 << 0x3 << 0x7 << 0xf <<
        0x1f << 0x3f << 0x7f << 0xff <<
        0x1ff << 0x3ff << 0x7ff << 0xfff <<
        0x1fff << 0x3fff << 0x7fff << 0xffff;
 
-const quint16 BitBlt::AllOnes = 0xffff;
+const qint16 BitBlt::AllOnes = 0xffff;

@@ -294,7 +294,7 @@ namespace St
         QList<OOP> semaphoreList;
         quint32 cycleNr, level;
         quint8 currentBytecode;
-        bool d_run, success, newProcessWaiting;
+        bool success, newProcessWaiting;
     };
 }
 

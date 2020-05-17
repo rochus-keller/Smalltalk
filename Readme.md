@@ -16,6 +16,9 @@ I see two implementation variants: run everything from the Smalltalk source code
 Smalltalk image (i.e. Blue book bytecode). To further analyze the Xerox implementation and make a decision
 I needed a good tool, so here we are.
 
+AND NOT TO FORGET: Smalltalk-80 turns 40 this year, and Alan Kay turns 80!
+
+
 ### A Smalltalk-80 parser and code model written in C++
 
 Of course I could have implemented everything in Smalltalk as they did with the original Squeak and Cog VMs. But
