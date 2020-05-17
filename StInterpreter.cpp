@@ -1616,7 +1616,8 @@ void Interpreter::dispatchSystemPrimitives()
 
 void Interpreter::dispatchPrivatePrimitives()
 {
-    ST_TRACE_PRIMITIVE("WARNING: not yet implemented");
+    ST_TRACE_PRIMITIVE("");
+    qWarning() << "WARNING: dispatchPrivatePrimitives not yet implemented";
     // TODO
 }
 
@@ -2545,6 +2546,8 @@ void Interpreter::primitiveBeDisplay()
 
 void Interpreter::primitiveCopyBits()
 {
+    // primitive 96
+
     /* Stack:
     9 "<a BitBlt>" // there is always a BitBlt or one of its subclasses top of the stack
     8 "<a Form>"
@@ -2577,8 +2580,19 @@ void Interpreter::primitiveCopyBits()
     in.clipWidth = memory->integerValueOf( memory->fetchPointerOfObject(12,bitblt), true );
     in.clipHeight = memory->integerValueOf( memory->fetchPointerOfObject(13,bitblt), true );
 
+//    if( !halftoneBits.isNull() )
+//        Q_ASSERT( halftoneBits.width() == 16 && halftoneBits.height() == 16 ); // this always holds
+
     BitBlt bb( in );
     bb.copyBits();
+
+//    if( in.width < 16 && in.height < 16 )
+//    {
+//        destBits.toImage().save("dest.png");
+//        sourceBits.toImage().save("source.png");
+//        sourceBits.toImage(in.sourceX,in.sourceY,in.width,in.height).save("sourcecut.png");
+//        halftoneBits.toImage().save("halftone.png");
+//    }
 
     // checked that if we pop BitBlt then the interpreter behaves stranegly and eventually crashes.
 }
@@ -2587,7 +2601,6 @@ void Interpreter::primitiveStringReplace()
 {
     primitiveFail(); // optional, apparently has as smalltalk implementation
     // pop(4);
-    // qWarning() << "TODO: primitiveStringReplace";
 }
 
 void Interpreter::dumpStack_(const char* title)
@@ -2786,19 +2799,22 @@ void Interpreter::primitiveTruncated()
 
 void Interpreter::primitiveFractionalPart()
 {
-    ST_TRACE_PRIMITIVE("WARNING: not yet implemented");
+    ST_TRACE_PRIMITIVE("");
+    qWarning() << "WARNING: primitiveFractionalPart not yet implemented";
     primitiveFail(); // TODO
 }
 
 void Interpreter::primitiveExponent()
 {
-    ST_TRACE_PRIMITIVE("WARNING: not yet implemented");
+    ST_TRACE_PRIMITIVE("");
+    qWarning() << "WARNING: primitiveExponent not yet implemented";
     primitiveFail(); // TODO
 }
 
 void Interpreter::primitiveTimesTwoPower()
 {
-    ST_TRACE_PRIMITIVE("WARNING: not yet implemented");
+    ST_TRACE_PRIMITIVE("");
+    qWarning() << "WARNING: primitiveTimesTwoPower not yet implemented";
     primitiveFail(); // TODO
 }
 

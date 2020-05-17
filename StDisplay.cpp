@@ -28,6 +28,8 @@
 #include <QCloseEvent>
 using namespace St;
 
+//#define _USE_BB_IMP_
+
 static Display* s_inst = 0;
 bool Display::s_run = true;
 
@@ -58,16 +60,7 @@ void Display::setBitmap(const Bitmap& buf)
 
 void Display::setCursorBitmap(const Bitmap& bm)
 {
-    QImage img( bm.width(), bm.height(), QImage::Format_Mono );
-    const int lw = bm.lineWidth() / 8;
-    for( int y = 0; y < bm.height(); y++ )
-    {
-        uchar* dest = img.scanLine(y);
-        const quint8* src = bm.scanLine(y);
-        for( int x = 0; x < lw; x++ )
-            dest[x] = ~src[x];
-    }
-    QBitmap pix = QPixmap::fromImage(img);
+    QBitmap pix = QPixmap::fromImage( bm.toImage() );
     setCursor( QCursor( pix, pix, 0, 0 ) );
 }
 
@@ -170,14 +163,47 @@ void Bitmap::wordAtPut(qint16 i, qint16 v)
     writeU16( d_buf, i * 2, v );
 }
 
-BitBlt::BitBlt(const Input& in)
+QImage Bitmap::toImage() const
 {
-    sourceBits = in.sourceBits;
-    destBits = in.destBits;
-    halftoneBits = in.halftoneBits;
-    combinationRule = in.combinationRule;
-    destX = in.destX; clipX = in.clipX; clipWidth = in.clipWidth; sourceX = in.sourceX; width = in.width;
-    destY = in.destY; clipY = in.clipY; clipHeight = in.clipHeight; sourceY = in.sourceY; height = in.height;
+    if( isNull() )
+        return QImage();
+    QImage img( width(), height(), QImage::Format_Mono );
+    const int lw = lineWidth() / 8;
+    for( int y = 0; y < height(); y++ )
+    {
+        uchar* dest = img.scanLine(y);
+        const quint8* src = scanLine(y);
+        for( int x = 0; x < lw; x++ )
+            dest[x] = ~src[x];
+    }
+    return img;
+}
+
+QImage Bitmap::toImage(quint16 x, quint16 y, quint16 w, quint16 h) const
+{
+    if( isNull() || x >= d_pixWidth || y >= d_pixHeight || ( x + w > d_pixWidth ) || ( y + h > d_pixHeight ) )
+        return QImage();
+    QImage img( w, h, QImage::Format_Mono );
+    img.fill(1);
+    for( int yy = 0; yy < h; yy++ )
+    {
+        for( int xx = 0; xx < w; xx++ )
+        {
+            if( test( xx + x, yy + y ) )
+                img.setPixel( xx, yy, 0 );
+        }
+    }
+    return img;
+}
+
+BitBlt::BitBlt(const Input& in):
+    sourceBits( in.sourceBits ),
+    destBits( in.destBits ),
+    halftoneBits( in.halftoneBits ),
+    combinationRule( in.combinationRule ),
+    destX( in.destX ), clipX( in.clipX ), clipWidth( in.clipWidth ), sourceX( in.sourceX ), width( in.width ),
+    destY( in.destY ), clipY( in.clipY ), clipHeight( in.clipHeight ), sourceY( in.sourceY ), height( in.height )
+{
 }
 
 void BitBlt::copyBits()
@@ -193,6 +219,8 @@ void BitBlt::copyBits()
 
 void BitBlt::clipRange()
 {
+    // set sx/y, dx/y, w and h so that dest doesn't exceed clipping range and
+    // source only covers what needed by clipped dest
     if( destX >= clipX )
     {
         sx = sourceX;
@@ -261,9 +289,11 @@ void BitBlt::computeMasks()
 
 void BitBlt::checkOverlap()
 {
+#ifdef _USE_BB_IMP_
     hDir = vDir = 1;
     if( sourceBits == destBits && dy >= sy )
     {
+        // is never executed
         if( dy > sy )
         {
             vDir = -1;
@@ -280,6 +310,7 @@ void BitBlt::checkOverlap()
             mask2 = t;
         }
     }
+#endif
 }
 
 void BitBlt::calculateOffsets()
@@ -295,6 +326,10 @@ void BitBlt::calculateOffsets()
 
 void BitBlt::copyLoop()
 {
+#ifdef _USE_BB_IMP_
+
+    // this code doesn't seem to properly work
+
     qint16 prevWord, thisWord, skewWord, mergeMask,
             halftoneWord, mergeWord, word;
     for( int i = 1; i <= h; i++ )
@@ -336,6 +371,29 @@ void BitBlt::copyLoop()
         sourceIndex = sourceIndex + sourceDelta;
         destIndex = destIndex + destDelta;
     }
+#else
+
+    // this code produces the same screen as the "Smalltalk 80 Virtual Image Version 2" handbook and
+    // doesn't seem to be slower than the above BB code
+    for( int y = 0; y < h; y++ )
+    {
+        for( int x = 0; x < w; x++ )
+        {
+            const quint16 dest = destBits->test(dx+x,dy+y);
+            if( sourceBits )
+            {
+                bool bit = merge( sourceBits->test(sx+x,sy+y), dest ) != 0;
+                destBits->set( dx+x, dy+y, bit );
+            }else
+            {
+                const bool halftone = halftoneBits != 0 ? halftoneBits->test( x & 15, y & 15 ) : AllOnes;
+                bool bit = merge( halftone, dest ) != 0;
+                destBits->set( dx+x, dy+y, bit );
+            }
+        }
+    }
+
+#endif
 }
 
 qint16 BitBlt::merge(qint16 source, qint16 destination)

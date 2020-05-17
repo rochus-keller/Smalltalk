@@ -1,7 +1,7 @@
 ## About this project
 
 Some time ago I came accross Mario Wolczko's site (http://www.wolczko.com/st80) when searching for an original 
-Smalltalk-80 implementation corresponding to the famous Smalltalk "Blue book" (see http://stephane.ducasse.free.fr/FreeBooks/BlueBook/Bluebook.pdf). 
+Smalltalk-80 implementation corresponding to the famous Smalltalk "Blue Book" (see http://stephane.ducasse.free.fr/FreeBooks/BlueBook/Bluebook.pdf). 
 I used Smalltalk in the nineties and also played around with Squeak and Pharo.
 But I was surprised that there was no VM around capable of running the original Xerox images, which
 Mario provides on this link: http://www.wolczko.com/st80/image.tar.gz. I wasn't able to load this image with
@@ -13,7 +13,7 @@ I got interested in the question whether it would be feasible to use LuaJIT as a
 what performance it would achieve compared to Cog (see https://github.com/OpenSmalltalk/opensmalltalk-vm).
 There are many similarities between Lua and Smalltalk, even though the syntax is very different. 
 I see two implementation variants: run everything from the Smalltalk source code, or run it from the
-Smalltalk image (i.e. Blue book bytecode). To further analyze the Xerox implementation and make a decision
+Smalltalk image (i.e. Blue Book bytecode). To further analyze the Xerox implementation and make a decision
 I needed a good tool, so here we are.
 
 AND NOT TO FORGET: Smalltalk-80 turns 40 this year, and Alan Kay turns 80!
@@ -73,6 +73,14 @@ There is also a browsing history; you can go back or forward using the ALT+Left 
 Here is a screenshot:
 
 ![Overview](http://software.rochus-keller.info/smalltalk80_image_viewer_0.5.png)
+
+### A Smalltalk-80 Virtual Machine
+
+This is a Blue Book implementation and currently work in progress. The focus is on functionality and compliance with the Blue Book, not on performance (it performs decently though). The interpreter reproduces the original Xerox trace2 and trace3 files included with http://www.wolczko.com/st80/image.tar.gz. The initial screen after startup corresponds to the screenshot shown on page 3 of the "Smalltalk 80 Virtual Image Version 2" manual.
+
+Here is a screenshot of the running VM immediately after startup:
+
+![Screenshot](http://software.rochus-keller.info/smalltalk80_vm_0.2.png)
 
 
 ### Binary versions

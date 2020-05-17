@@ -31,9 +31,28 @@ namespace St
         enum { PixPerByte = 8, PixPerWord = PixPerByte * 2 };
         Bitmap():d_buf(0),d_wordLen(0) {}
         Bitmap( quint8* buf, qint16 wordLen, qint16 pixWidth, qint16 pixHeight );
-        const quint8* scanLine(int y) const
+        inline const quint8* scanLine(int y) const
         {
             return d_buf + ( y * d_pixLineWidth / PixPerByte );
+        }
+        inline bool test(quint16 x, quint16 y) const
+        {
+            const int bytePos = ( y * d_pixLineWidth + x ) / PixPerByte;
+            const quint8 bitpos = 7 - x % 8 ;
+            const quint8 pat = 1 << bitpos;
+            Q_ASSERT( bytePos < d_wordLen * 2 );
+            return ( d_buf[bytePos] & pat ) > 0;
+        }
+        inline void set(quint16 x, quint16 y, bool on) const
+        {
+            const int bytePos = ( y * d_pixLineWidth + x ) / PixPerByte;
+            const quint8 bitpos = 7 - x % 8 ;
+            const quint8 pat = 1 << bitpos;
+            Q_ASSERT( bytePos < d_wordLen * 2 );
+            if( on )
+                d_buf[bytePos] |= pat;
+            else
+                d_buf[bytePos] &= ~pat;
         }
         qint16 lineWidth() const { return d_pixLineWidth; }
         qint16 width() const { return d_pixWidth; }
@@ -41,6 +60,8 @@ namespace St
         qint16 wordAt(qint16 i ) const;
         void wordAtPut( qint16 i, qint16 v );
         bool isNull() const { return d_buf == 0; }
+        QImage toImage() const;
+        QImage toImage(quint16 x, quint16 y, quint16 w, quint16 h) const;
     private:
         qint16 d_pixWidth, d_pixHeight, d_pixLineWidth, d_wordLen;
         quint8* d_buf;
@@ -73,9 +94,9 @@ namespace St
         // Known to be inefficient; focus is on functionality and compliance.
         struct Input
         {
-            Bitmap* sourceBits;
+            const Bitmap* sourceBits;
             Bitmap* destBits;
-            Bitmap* halftoneBits;
+            const Bitmap* halftoneBits;
             qint16 combinationRule;
             qint16 destX, clipX, clipWidth, sourceX, width;
             qint16 destY, clipY, clipHeight, sourceY, height;
@@ -91,19 +112,19 @@ namespace St
         void checkOverlap();
         void calculateOffsets();
         void copyLoop();
-        qint16 merge(qint16 source, qint16 destination );
+        inline qint16 merge(qint16 source, qint16 destination );
     private:
-        Bitmap* sourceBits;
-        qint16 sourceRaster;
+        const Bitmap* sourceBits;
+        const Bitmap* halftoneBits;
+        const qint16 destX, clipX, clipWidth, sourceX, width; // pixel
+        const qint16 destY, clipY, clipHeight, sourceY, height; // pixel
+        const qint16 combinationRule;
         Bitmap* destBits;
+        qint16 sourceRaster;
         qint16 destRaster;
-        Bitmap* halftoneBits;
         qint16 skew, mask1, mask2, skewMask, nWords, vDir, hDir;
-        qint16 sx, sy, dx, dy, w, h;
-        qint16 destX, clipX, clipWidth, sourceX, width;
-        qint16 destY, clipY, clipHeight, sourceY, height;
+        qint16 sx, sy, dx, dy, w, h; // pixel
         qint16 sourceIndex, destIndex, sourceDelta, destDelta;
-        qint16 combinationRule;
         bool preload;
         static const QList<qint16> RightMasks;
         static const qint16 AllOnes;
