@@ -35,6 +35,7 @@
 #include <QVBoxLayout>
 #include <QLabel>
 #include <QShortcut>
+#include <QInputDialog>
 using namespace St;
 
 class ImageViewer::Model : public QAbstractItemModel
@@ -350,21 +351,21 @@ public:
         case Slot::Float:
             {
                 ST_OBJECT_MEMORY::ByteString bs = d_om->fetchByteString(s->d_oop);
-                const QByteArray str = QByteArray::fromRawData((const char*)bs.d_bytes, bs.d_len).toHex();
+                const QByteArray str = QByteArray::fromRawData((const char*)bs.d_bytes, bs.d_byteLen).toHex();
                 return QString("%1 = %2").arg( str.constData() ).arg( d_om->fetchFloat(s->d_oop) );
             }
             break;
         case Slot::LargeInt:
             {
                 ST_OBJECT_MEMORY::ByteString bs = d_om->fetchByteString(s->d_oop);
-                const QByteArray str = QByteArray::fromRawData((const char*)bs.d_bytes, bs.d_len).toHex();
+                const QByteArray str = QByteArray::fromRawData((const char*)bs.d_bytes, bs.d_byteLen).toHex();
                 return QString("%1 = %2L").arg( str.constData() ).arg( d_om->largeIntegerValueOf(s->d_oop) );
             }
             break;
         case Slot::Chunk:
             {
                 ST_OBJECT_MEMORY::ByteString bs = d_om->fetchByteString(s->d_oop);
-                const QByteArray str = QByteArray::fromRawData((const char*)bs.d_bytes, bs.d_len);
+                const QByteArray str = QByteArray::fromRawData((const char*)bs.d_bytes, bs.d_byteLen);
                 const int len = 16;
                 if( str.size() > len )
                     return str.left(len).toHex() + "... (" + QByteArray::number(str.size()) + " bytes)";
@@ -375,12 +376,12 @@ public:
         case Slot::Bytecode:
             {
                 ST_OBJECT_MEMORY::ByteString bs = d_om->methodBytecodes(s->d_oop);
-                const QByteArray str = QByteArray::fromRawData((const char*)bs.d_bytes, bs.d_len );
+                const QByteArray str = QByteArray::fromRawData((const char*)bs.d_bytes, bs.d_byteLen );
                 const int len = 16;
-                if( bs.d_len > len )
-                    return str.left(len).toHex() + "... (" + QByteArray::number(bs.d_len) + " bytes)";
+                if( bs.d_byteLen > len )
+                    return str.left(len).toHex() + "... (" + QByteArray::number(bs.d_byteLen) + " bytes)";
                 else
-                    return str.toHex() + " (" + QByteArray::number(bs.d_len) + " bytes)";
+                    return str.toHex() + " (" + QByteArray::number(bs.d_byteLen) + " bytes)";
             }
             break;
         case Slot::Int:
@@ -497,6 +498,9 @@ ImageViewer::ImageViewer():d_pushBackLock(false)
 
     new QShortcut(tr("ALT+LEFT"),this,SLOT(onGoBack()));
     new QShortcut(tr("ALT+RIGHT"),this,SLOT(onGoForward()));
+    new QShortcut(tr("CTRL+G"),this,SLOT(onGotoAddr()));
+    new QShortcut( tr("CTRL+F"), this, SLOT(onFindText()));
+    new QShortcut( tr("F3"), this, SLOT(onFindNext()));
 }
 
 bool ImageViewer::parse(const QString& path)
@@ -875,12 +879,12 @@ QString ImageViewer::methodDetailText(quint16 oop)
     }
 
     ST_OBJECT_MEMORY::ByteString bs = d_om->methodBytecodes(oop);
-    if( bs.d_len > 0 )
+    if( bs.d_byteLen > 0 )
     {
         out << "<h3>Bytecode</h3>";
         out << "<table width=100% align=left cellspacing=0 cellpadding=3>";
         int pc = 0;
-        while( pc < bs.d_len )
+        while( pc < bs.d_byteLen )
         {
             QPair<QString,int> res = bytecodeText(bs.d_bytes, pc);
             out << "<tr><td>";
@@ -922,8 +926,13 @@ QByteArrayList ImageViewer::fieldList(quint16 cls, bool recursive)
     return res;
 }
 
-QByteArray ImageViewer::prettyValue(quint16 val)
+QString ImageViewer::prettyValue(quint16 val)
 {
+    return QString("<a href=\"oop:%2\">%3</a> %1").
+            arg( QString::fromLatin1(d_om->prettyValue(val)).toHtmlEscaped() ).
+            arg(val,0,16).arg(val,4,16,QChar('0'));
+
+#if 0
     const quint16 cls = d_om->fetchClassOf(val);
     switch( cls )
     {
@@ -952,6 +961,7 @@ QByteArray ImageViewer::prettyValue(quint16 val)
         break;
     }
     return QByteArray();
+#endif
 }
 
 void ImageViewer::syncClasses(quint16 oop)
@@ -1263,6 +1273,43 @@ void ImageViewer::onInstsClicked(QTreeWidgetItem* item, int)
     }
 }
 
+void ImageViewer::onGotoAddr()
+{
+    const QString hex = QInputDialog::getText(this,tr("Go to OOP"), tr("Enter OOP in hex:") ).trimmed();
+    if( hex.isEmpty() || hex.size() > 4 )
+        return;
+
+    bool ok;
+    quint32 addr = hex.toInt( &ok, 16 );
+    if( !ok || addr > 0xffff )
+        return;
+
+    quint16 oop = addr;
+    showDetail(oop);
+    syncClasses(oop);
+    syncObjects(oop);
+    fillInsts(oop);
+    fillXref(oop);
+    pushLocation(oop);
+}
+
+void ImageViewer::onFindText()
+{
+    const QString text = QInputDialog::getText(this,tr("Find text"), tr("Enter text:") ).trimmed();
+    if( text.isEmpty() )
+        return;
+
+    d_textToFind = text;
+    d_detail->find(text);
+}
+
+void ImageViewer::onFindNext()
+{
+    QTextCursor cur = d_detail->textCursor();
+    cur.movePosition(QTextCursor::EndOfWord);
+    d_detail->find(d_textToFind);
+}
+
 ObjectTree::ObjectTree(QWidget* p)
 {
     setAlternatingRowColors(true);
@@ -1291,7 +1338,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Image Viewer");
-    a.setApplicationVersion("0.7.2");
+    a.setApplicationVersion("0.7.3");
     a.setStyle("Fusion");
 
     ImageViewer w;

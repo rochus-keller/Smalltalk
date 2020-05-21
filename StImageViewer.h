@@ -57,7 +57,7 @@ namespace St
         QString classDetailText( quint16 );
         QString methodDetailText( quint16 );
         QByteArrayList fieldList( quint16 cls, bool recursive = true );
-        QByteArray prettyValue(quint16);
+        QString prettyValue(quint16);
         void syncClasses(quint16);
         void syncObjects(quint16);
         static QPair<QString,int> bytecodeText(const quint8* , int pc);
@@ -72,6 +72,9 @@ namespace St
         void onGoForward();
         void onXrefClicked(QTreeWidgetItem*,int);
         void onInstsClicked(QTreeWidgetItem*,int);
+        void onGotoAddr();
+        void onFindText();
+        void onFindNext();
     private:
         friend class ObjectTree;
         ST_OBJECT_MEMORY* d_om;
@@ -86,6 +89,7 @@ namespace St
         QTextBrowser* d_detail;
         QList<quint16> d_backHisto; // d_backHisto.last() is the current location
         QList<quint16> d_forwardHisto;
+        QString d_textToFind;
         bool d_pushBackLock;
     };
 

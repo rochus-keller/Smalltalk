@@ -31,6 +31,7 @@ namespace St
 
     class Interpreter : public QObject
     {
+        Q_OBJECT
     public:
         typedef quint16 OOP;
         enum MethodContext { SenderIndex = 0, // BB: The suspended context is called the new context's sender
@@ -39,7 +40,8 @@ namespace St
                            TempFrameStart = 6 };
         enum BlockContext { CallerIndex = 0, BlockArgumentCountIndex = 3, InitialIPIndex = 4, HomeIndex = 5 };
 
-        enum Registers { ActiveContext, HomeContext, Method, Receiver, MessageSelector, NewMethod, NewProcess };
+        enum Registers { ActiveContext, HomeContext, Method, Receiver, MessageSelector, NewMethod,
+                         NewProcess, InputSemaphore };
 
         enum MessageIndices {
             MessageSelectorIndex = 0,
@@ -92,6 +94,9 @@ namespace St
         void setOm( ObjectMemory2* om );
         void interpret();
         void cycle();
+    protected slots:
+        void onEvent();
+
     protected:
         qint16 instructionPointerOfContext( OOP contextPointer );
         void storeInstructionPointerValueInContext( qint16 value, OOP contextPointer );
@@ -288,11 +293,18 @@ namespace St
         void dumpStack_(const char* title = "");
         void primitiveBeCursor();
         void primitiveCursorLink();
+        void primitiveInputSemaphore();
+        void primitiveInputWord();
+        void primitiveSamleInterval();
+        void primitiveMousePoint();
+        void primitiveSignalAtOopsLeftWordsLeft();
+        void primitiveCursorLocPut();
     private:
         ObjectMemory2* memory;
-        qint16 stackPointer, instructionPointer, argumentCount, primitiveIndex, semaphoreIndex;
+        qint16 stackPointer, instructionPointer, argumentCount, primitiveIndex;
         QList<OOP> semaphoreList;
         quint32 cycleNr, level;
+        QByteArray prevMsg;
         quint8 currentBytecode;
         bool success, newProcessWaiting;
     };

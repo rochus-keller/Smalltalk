@@ -20,6 +20,8 @@
 * http://www.gnu.org/copyleft/gpl.html.
 */
 
+#include <QElapsedTimer>
+#include <QQueue>
 #include <QWidget>
 
 
@@ -71,20 +73,50 @@ namespace St
     {
         Q_OBJECT
     public:
+        enum EventType {
+            DeltaTime = 0,
+            XLocation = 1,
+            YLocation = 2,
+            BiStateOn = 3,
+            BiStateOff = 4,
+            AbsoluteTime = 5, // followed by 2 words
+        };
+        enum { MaxPos = 0xfff }; // 12 bits
+
         explicit Display(QWidget *parent = 0);
         static Display* inst();
         static bool s_run;
 
         void setBitmap( const Bitmap& );
         void setCursorBitmap( const Bitmap& );
+        void setCursorPos( qint16 x, qint16 y );
+        const QPoint& getMousePos() const { return d_mousePos; }
+        quint16 nextEvent() { return d_events.dequeue(); }
+
+    signals:
+        void sigEventQueue();
+
     protected:
         void paintEvent(QPaintEvent *);
         void timerEvent(QTimerEvent *);
         void closeEvent(QCloseEvent * event);
+        void mouseMoveEvent(QMouseEvent * event);
+        void mousePressEvent(QMouseEvent * event);
+        void mouseReleaseEvent(QMouseEvent *event);
+        void keyPressEvent(QKeyEvent* event);
+        void keyReleaseEvent(QKeyEvent* event);
         QString renderTitle() const;
+        bool postEvent(EventType, quint16 param = 0 , bool withTime = true);
+        bool keyEvent( int keyCode, bool down );
     private:
         Bitmap d_bitmap;
-        QImage d_img;
+        QImage d_screen;
+        QImage d_cursor;
+        qint16 d_curX, d_curY;
+        QPoint d_mousePos;
+        QQueue<quint16> d_events;
+        quint32 d_lastEvent; // number of milliseconds since last event was posted to queue
+        QElapsedTimer d_timer;
     };
 
     class BitBlt

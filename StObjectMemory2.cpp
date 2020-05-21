@@ -28,6 +28,12 @@ using namespace St;
 // see http://www.wolczko.com/st80/manual.pdf.gz
 // and the Blue Book
 
+//#define _ST_COUNT_INSTS_
+
+#ifdef _ST_COUNT_INSTS_
+static QHash<ObjectMemory2::OOP,int> s_countByClass;
+#endif
+
 ObjectMemory2::ObjectMemory2(QObject* p):QObject(p)
 {
 
@@ -300,8 +306,17 @@ QByteArray ObjectMemory2::prettyValue(ObjectMemory2::OOP oop) const
         return QByteArray::number( integerValueOf(oop) );
     case classLargePositiveInteger:
         return QByteArray::number( largeIntegerValueOf(oop) ) + "L";
+    case classLargeNegativeInteger:
+        return QByteArray::number( -largeIntegerValueOf(oop) ) + "L";
     case classString:
-        return "\"" + fetchByteArray(oop) + "\"";
+        {
+            const int maxlen = 40;
+            QByteArray str = fetchByteArray(oop).simplified();
+            if( str.size() > maxlen )
+                return "\"" + str.left(maxlen) + "\"...";
+            else
+                return "\"" + str + "\"";
+        }
     case classFloat:
         return QByteArray::number( fetchFloat(oop) );
     case classPoint:
@@ -454,10 +469,18 @@ float ObjectMemory2::fetchFloat(ObjectMemory2::OOP objectPointer) const
         float f;
         quint32 w;
     };
-#ifdef _DEBUG
+#ifdef _DEBUG_
     // The BB corresponds to the IEEE 754 32 bit floating point version
     w = 0x4048f5c2; // 3.14 rounded
     Q_ASSERT( qFabs( f - 3.1399998 ) < 0.0000001 );
+    union {
+        quint8 b[4];
+        quint32 w2;
+    };
+    b[3] = 0x40; b[2] = 0x48; b[1] = 0xf5; b[0] = 0xc2;
+    QByteArray buf = QByteArray::fromHex("4048f5c2");
+    Q_ASSERT( buf[0] == b[3] && buf[1] == b[2] && buf[2] == b[1] && buf[3] == b[0] );
+    Q_ASSERT( w2 == w );
 #endif
     w = fetchWordOfObject(0,objectPointer) << 16 | fetchWordOfObject(1,objectPointer);
     return f;
@@ -666,8 +689,9 @@ ObjectMemory2::OOP ObjectMemory2::integerObjectOf(qint16 value)
 bool ObjectMemory2::isIntegerValue(int valueWord)
 {
     // BB description: Return true if value can be represented as an instance of SmallInteger, false if not
-    // BB states "valueWord <= -16834 && valueWord > 16834;" which contradicts with the description
-    return valueWord >= -16834 && valueWord < 16834;
+    // BB states "valueWord <= -16384 && valueWord > 16834;" which contradicts with the description
+    // Note the additional typo error in "16834" which should state "16384"!
+    return valueWord >= -16384 && valueWord <= 16383;
 }
 
 int ObjectMemory2::largeIntegerValueOf(OOP integerPointer) const
@@ -684,7 +708,7 @@ int ObjectMemory2::largeIntegerValueOf(OOP integerPointer) const
 
     if( isIntegerObject(integerPointer) )
         return integerValueOf(integerPointer);
-    Q_ASSERT( fetchClassOf(integerPointer) == classLargePositiveInteger );
+    // Q_ASSERT( fetchClassOf(integerPointer) == classLargePositiveInteger );
     int value = 0;
     int len = fetchByteLenghtOf(integerPointer);
     if( len == 2 )
@@ -701,7 +725,13 @@ int ObjectMemory2::largeIntegerValueOf(OOP integerPointer) const
     {
         // TODO
         value = 99999999;
-    }else
+    }else if( len == 1 )
+    {
+        // TODO
+        value = fetchByteOfObject(0,integerPointer);
+    }else if( len == 0 )
+        value = 0; // this obviously can happen
+    else
         Q_ASSERT( false );
     return value;
 }
@@ -716,6 +746,11 @@ int ObjectMemory2::findFreeSlot()
 
 ObjectMemory2::OOP ObjectMemory2::instantiateClass(ObjectMemory2::OOP cls, quint16 byteLen, bool isPtr)
 {
+#ifdef _ST_COUNT_INSTS_
+    s_countByClass[cls]++;
+    qDebug() << "instantiate" << prettyValue(cls) << s_countByClass[cls]; // TEST
+#endif
+
     int slot = findFreeSlot();
     if( slot < 0 )
     {
@@ -724,12 +759,12 @@ ObjectMemory2::OOP ObjectMemory2::instantiateClass(ObjectMemory2::OOP cls, quint
     }
     if( slot < 0 )
     {
-        qCritical() << "cannot allocate object, no free object table slots";
+        qCritical() << "ERROR: cannot allocate object, no free object table slots";
         return 0;
     }
     if( d_ot.allocate( slot, byteLen, cls, isPtr ) == 0 )
     {
-        qCritical() << "cannot allocate object, no free memory";
+        qCritical() << "ERROR: cannot allocate object, no free memory";
         return 0;
     }
     return slot << 1;
@@ -766,6 +801,9 @@ void ObjectMemory2::collectGarbage()
             continue;
         if( !s.d_obj->d_flags.test(Object::Marked) )
         {
+#ifdef _ST_COUNT_INSTS_
+            s_countByClass[ d_ot.d_slots[i].getClass() ]--;
+#endif
             d_ot.free(i);
             d_freeSlots.enqueue(i);
             count++;

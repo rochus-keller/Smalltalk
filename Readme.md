@@ -16,7 +16,9 @@ I see two implementation variants: run everything from the Smalltalk source code
 Smalltalk image (i.e. Blue Book bytecode). To further analyze the Xerox implementation and make a decision
 I needed a good tool, so here we are.
 
-AND NOT TO FORGET: Smalltalk-80 turns 40 this year, and Alan Kay turns 80!
+AND NOT TO FORGET: Smalltalk-80 turns 40 this year (2020), and Alan Kay turns 80 (May 17)!
+
+I don't seem to be the only one interested in an original Blue Book Smalltalk-80 VM. Today (May 18 2020) I found this very interesting post on Reddit: https://www.reddit.com/r/smalltalk/comments/glqbrh/in_honor_of_alans_birthday_by_the_bluebook_c/ which refers to https://github.com/dbanay/Smalltalk. The initial commit was apparently on May 12; the implementation is based on C++11 and SDL. Of course I will have a close look at it, but continue with my own implementation anyway, which eventually is supposed to run on LuaJIT if feasible.
 
 
 ### A Smalltalk-80 parser and code model written in C++

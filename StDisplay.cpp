@@ -32,15 +32,18 @@ using namespace St;
 
 static Display* s_inst = 0;
 bool Display::s_run = true;
+static const int s_msPerFrame = 30; // 20ms according to BB
 
-Display::Display(QWidget *parent) : QWidget(parent)
+Display::Display(QWidget *parent) : QWidget(parent),d_curX(-1),d_curY(-1)
 {
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setCursor(Qt::BlankCursor);
     setWindowTitle( renderTitle() );
     show();
-    startTimer(30); // 20ms according to BB
+    d_lastEvent = 0;
+    d_timer.start();
+    startTimer(s_msPerFrame);
 }
 
 Display*Display::inst()
@@ -53,15 +56,27 @@ Display*Display::inst()
 void Display::setBitmap(const Bitmap& buf)
 {
     d_bitmap = buf;
-    d_img = QImage( d_bitmap.width(), d_bitmap.height(), QImage::Format_Mono );
+    d_screen = QImage( d_bitmap.width(), d_bitmap.height(), QImage::Format_Mono );
     setFixedSize( buf.width(), buf.height() );
     update();
 }
 
 void Display::setCursorBitmap(const Bitmap& bm)
 {
+#if 1 // use Qt cursor
     QBitmap pix = QPixmap::fromImage( bm.toImage() );
     setCursor( QCursor( pix, pix, 0, 0 ) );
+#else
+    d_cursor = bm.toImage();
+#endif
+    update();
+}
+
+void Display::setCursorPos(qint16 x, qint16 y)
+{
+    d_curX = x;
+    d_curY = y;
+    update();
 }
 
 void Display::paintEvent(QPaintEvent*)
@@ -69,7 +84,6 @@ void Display::paintEvent(QPaintEvent*)
     if( d_bitmap.isNull() )
         return;
     QPainter p(this);
-
 #if 0
     p.fillRect(0,0,d_bitmap.width(),d_bitmap.height(), Qt::white );
     p.setPen(Qt::black);
@@ -88,15 +102,42 @@ void Display::paintEvent(QPaintEvent*)
     const int lw = d_bitmap.lineWidth() / 8;
     for( int y = 0; y < d_bitmap.height(); y++ )
     {
-        uchar* dest = d_img.scanLine(y);
+        uchar* dest = d_screen.scanLine(y);
         const quint8* src = d_bitmap.scanLine(y);
         for( int x = 0; x < lw; x++ )
             dest[x] = ~src[x];
         //memcpy( dest, src, lw );
     }
+
+#if 0 // draw cursor ourselves
     //d_img.invertPixels();
+    if( false ) // d_curX >= 0 && d_curY >= 0 )
+    {
+        QPainter p(&d_screen);
+        p.drawImage( d_curX, d_curY, d_cursor);
+    }else if( !d_cursor.isNull() )
+    {
+#if 1
+        QPainter p(&d_screen);
+        p.setCompositionMode(QPainter::CompositionMode_ColorBurn);
+        p.drawImage( d_mousePos.x(), d_mousePos.y(), d_cursor);
+#else
+        const int mx = d_mousePos.x();
+        const int my = d_mousePos.y();
+        for( int y = 0; y < d_cursor.height(); y++ )
+        {
+            // pixelIndex black=0, white=1
+            for( int x = 0; x < d_cursor.width(); x++ )
+            {
+                if( d_cursor.pixelIndex(x,y) == 0 )
+                    d_screen.setPixel( mx + x, my + y, d_screen.pixelIndex( mx + x, my + y ) ? 0 : 1 );
+            }
+        }
 #endif
-    p.drawImage(0,0,d_img);
+    }
+#endif
+#endif
+    p.drawImage(0,0,d_screen);
 }
 
 void Display::timerEvent(QTimerEvent*)
@@ -113,9 +154,167 @@ void Display::closeEvent(QCloseEvent* event)
         s_run = false;
 }
 
+void Display::mouseMoveEvent(QMouseEvent* event)
+{
+    QPoint old = d_mousePos;
+    d_mousePos = event->pos();
+    if( d_mousePos.x() < 0 )
+        d_mousePos.setX(0);
+    if( d_mousePos.y() < 0 )
+        d_mousePos.setY(0);
+    if( d_mousePos.x() >= width() )
+        d_mousePos.setX( width() - 1 );
+    if( d_mousePos.y() >= height() )
+        d_mousePos.setY( height() - 1 );
+
+    quint32 diff = d_timer.elapsed() - d_lastEvent;
+    if( diff < s_msPerFrame )
+        return;
+
+    if( old.x() != d_mousePos.x() )
+    {
+        if( d_mousePos.x() > MaxPos )
+            postEvent( XLocation, MaxPos );
+        else
+            postEvent( XLocation, d_mousePos.x() );
+    }
+    if( old.y() != d_mousePos.y() )
+    {
+        if( d_mousePos.y() > MaxPos )
+            postEvent( YLocation, MaxPos );
+        else
+            postEvent( YLocation, d_mousePos.y() );
+    }
+}
+
+void Display::mousePressEvent(QMouseEvent* event)
+{
+    switch( event->button() )
+    {
+    case Qt::LeftButton:
+        postEvent( BiStateOn, 130 );
+        break;
+    case Qt::RightButton:
+        postEvent( BiStateOn, 129 ); // BB error, mixed up 129 and 128
+        break;
+    case Qt::MidButton:
+        postEvent( BiStateOn, 128 );
+        break;
+    default:
+        break;
+    }
+}
+
+void Display::mouseReleaseEvent(QMouseEvent* event)
+{
+    switch( event->button() )
+    {
+    case Qt::LeftButton:
+        postEvent( BiStateOff, 130 );
+        break;
+    case Qt::RightButton:
+        postEvent( BiStateOff, 129 ); // BB error, mixed up 129 and 128
+        break;
+    case Qt::MidButton:
+        postEvent( BiStateOff, 128 );
+        break;
+    default:
+        break;
+    }
+}
+
+void Display::keyPressEvent(QKeyEvent* event)
+{
+#if 0
+    qDebug() << QByteArray::number(event->key(),16).constData() << event->text();
+    if( !event->text().isEmpty() )
+    {
+        const int ch = event->text()[0].unicode();
+        if( ch <= 128)
+        {
+            postEvent( BiStateOn, ch, true );
+            postEvent( BiStateOff, ch, false );
+        } // else ignore
+    }else
+#endif
+        // TODO: fix keyboard mappings
+    if( !keyEvent( event->key(), true ) )
+        QWidget::keyPressEvent(event);
+}
+
+void Display::keyReleaseEvent(QKeyEvent* event)
+{
+    if( !keyEvent( event->key(), false ) )
+        QWidget::keyReleaseEvent(event);
+}
+
 QString Display::renderTitle() const
 {
     return QString("%1 v%2").arg( QApplication::applicationName() ).arg( QApplication::applicationVersion() );
+}
+
+static inline quint16 compose( quint8 t, quint16 p )
+{
+    return t << 12 | p;
+}
+
+bool Display::postEvent(Display::EventType t, quint16 param, bool withTime )
+{
+    Q_ASSERT( t >= XLocation && t <= BiStateOff );
+
+    if( withTime )
+    {
+        quint32 time = d_timer.elapsed();
+        quint32 diff = time - d_lastEvent;
+        d_lastEvent = time;
+
+        if( diff <= MaxPos )
+        {
+            d_events.enqueue( compose( DeltaTime, diff ) );
+            emit sigEventQueue();
+        }else
+        {
+            d_events.enqueue( compose( AbsoluteTime, 0 ) );
+            emit sigEventQueue();
+            d_events.enqueue( ( time >> 16 ) & 0xffff);
+            emit sigEventQueue();
+            d_events.enqueue( time & 0xffff );
+            emit sigEventQueue();
+        }
+    }
+    d_events.enqueue( compose( t, param ) );
+    emit sigEventQueue();
+    return true;
+}
+
+bool Display::keyEvent(int keyCode, bool down)
+{
+    switch( keyCode )
+    {
+    case Qt::Key_Backspace:
+        return postEvent( down ? BiStateOn : BiStateOff, 8 );
+    case Qt::Key_Tab:
+        return postEvent( down ? BiStateOn : BiStateOff, 9 );
+        // NOTE: line feed	10 not supported
+    case Qt::Key_Return:
+        return postEvent( down ? BiStateOn : BiStateOff, 13 );
+    case Qt::Key_Escape:
+        return postEvent( down ? BiStateOn : BiStateOff, 27 );
+    case Qt::Key_Space:
+        return postEvent( down ? BiStateOn : BiStateOff, 32 );
+    case Qt::Key_Delete:
+        return postEvent( down ? BiStateOn : BiStateOff, 127 );
+        // NOTE: right shift	137
+    case Qt::Key_Shift:
+        return postEvent( down ? BiStateOn : BiStateOff, 136 );
+    case Qt::Key_Control:
+        return postEvent( down ? BiStateOn : BiStateOff, 138 );
+    case Qt::Key_CapsLock:
+        return postEvent( down ? BiStateOn : BiStateOff, 139 );
+    }
+    if( keyCode >= '!' && keyCode <= '~' )
+        return postEvent( down ? BiStateOn : BiStateOff, ::tolower(keyCode) );
+    return false;
 }
 
 Bitmap::Bitmap(quint8* buf, qint16 wordLen, qint16 pixWidth, qint16 pixHeight)
@@ -289,11 +488,11 @@ void BitBlt::computeMasks()
 
 void BitBlt::checkOverlap()
 {
-#ifdef _USE_BB_IMP_
     hDir = vDir = 1;
     if( sourceBits == destBits && dy >= sy )
     {
         // is never executed
+#ifdef _USE_BB_IMP_
         if( dy > sy )
         {
             vDir = -1;
@@ -309,8 +508,10 @@ void BitBlt::checkOverlap()
             mask1 = mask2;
             mask2 = t;
         }
-    }
+#else
+        qWarning() << "WARINING: BitBlt::checkOverlap for sourceBits == destBits && dy >= sy not implemented";
 #endif
+    }
 }
 
 void BitBlt::calculateOffsets()

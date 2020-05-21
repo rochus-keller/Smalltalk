@@ -82,6 +82,7 @@ namespace St
             // extra knowns
             classSymbol = 0x38,
             classMethodDictionary = 0x4c,
+            classLargeNegativeInteger = 0x1da0,
         };
 
         enum CompiledMethodFlags {

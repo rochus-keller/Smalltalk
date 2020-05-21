@@ -21,10 +21,12 @@
 #include "StInterpreter.h"
 #include <QtDebug>
 #include <QApplication>
+#include <math.h>
 using namespace St;
 
 //#define ST_DO_TRACING
 //#define ST_DO_TRACE2
+#define ST_TRACE_SYSTEM_ERRORS
 
 #ifdef ST_DO_TRACING
 #ifdef ST_DO_TRACE2
@@ -32,18 +34,18 @@ using namespace St;
     << __FUNCTION__ << msg;
 #define ST_TRACE_PRIMITIVE(msg) qDebug() << "Primitive" << ( "#" + QByteArray::number(primitiveIndex)  ).constData() \
     << __FUNCTION__ << msg;
-#define ST_TRACE_METHOD_CALL qDebug() << ( "[cycle=" + QByteArray::number(cycleNr) + "]" ).constData() << \
+#define ST_TRACE_METHOD_CALL qDebug() << level << ( "[cycle=" + QByteArray::number(cycleNr) + "]" ).constData() << \
     memory->prettyValue(stackValue(argumentCount) ).constData() << \
     QByteArray::number(memory->getRegister(NewMethod),16).constData() << \
     memory->fetchByteArray(memory->getRegister(MessageSelector)).constData() << prettyArgs_().constData();
 #define ST_RETURN_BYTECODE(msg) ST_TRACE_BYTECODE(msg)
 #else
-#define ST_TRACE_METHOD_CALL qDebug() << QByteArray(level,'\t').constData() << \
+#define ST_TRACE_METHOD_CALL qDebug() << level /*<< QByteArray(level,'\t').constData() */ << \
     ( "[cycle=" + QByteArray::number(cycleNr) + "]" ).constData() << \
     memory->prettyValue(stackValue(argumentCount) ).constData() << \
     QByteArray::number(memory->getRegister(NewMethod),16).constData() << \
     memory->fetchByteArray(memory->getRegister(MessageSelector)).constData() << prettyArgs_().constData();
-#define ST_RETURN_BYTECODE(msg) qDebug() << QByteArray(level,'\t').constData() << \
+#define ST_RETURN_BYTECODE(msg) qDebug() << level /*<< QByteArray(level,'\t').constData() */ << \
     "^" << ( "<" + QByteArray::number(currentBytecode) + ">" ).constData() << msg;
 #define ST_TRACE_BYTECODE(msg)
 #define ST_TRACE_PRIMITIVE(msg)
@@ -56,7 +58,7 @@ using namespace St;
 #endif
 
 Interpreter::Interpreter(QObject* p):QObject(p),memory(0),stackPointer(0),instructionPointer(0),
-    semaphoreIndex(0), newProcessWaiting(false),cycleNr(0), level(0)
+    newProcessWaiting(false),cycleNr(0), level(0)
 {
 
 }
@@ -101,6 +103,8 @@ void Interpreter::setOm(ObjectMemory2* om)
         Display::inst()->setBitmap( fetchBitmap(memory, display) );
     }else
         Display::inst()->setBitmap(Bitmap());
+    disconnect( Display::inst(), SIGNAL(sigEventQueue()), this, SLOT(onEvent()) );
+    connect( Display::inst(), SIGNAL(sigEventQueue()), this, SLOT(onEvent()) );
 }
 
 void Interpreter::interpret()
@@ -116,9 +120,8 @@ void Interpreter::interpret()
     //     ->quit->saveAs:thenQuit:->snapshotAs:thenQuit:
     // top: BlockContext->newProcess, ControllManager->activeController:
 
-    while( Display::s_run ) // && cycleNr < 2000 ) // TEST trace2 < 500 trace3 < 2000
+    while( Display::s_run ) // && cycleNr < 2000 ) // trace2 < 500 trace3 < 2000
     {
-        // TODO: runs until "[cycle=269451] <a Semaphore> 8d8e wait" and stays there
         cycle();
         qApp->processEvents();
     }
@@ -293,7 +296,10 @@ bool Interpreter::lookupMethodInClass(Interpreter::OOP cls)
         return false;
     }
     createActualMessage();
+    OOP selector = memory->getRegister(MessageSelector);
     memory->setRegister(MessageSelector, ObjectMemory2::symbolDoesNotUnderstand );
+    qCritical() << "ERROR: class" << memory->prettyValue(cls) << "doesNotUnderstand"
+                << memory->prettyValue( selector );
     return lookupMethodInClass(cls);
 }
 
@@ -334,6 +340,7 @@ qint16 Interpreter::fixedFieldsOf(Interpreter::OOP classPointer)
 
 quint8 Interpreter::fetchByte()
 {
+    Q_ASSERT( instructionPointer >= 0 );
     return memory->fetchByteOfObject(instructionPointer++, memory->getRegister(Method) );
 }
 
@@ -345,21 +352,32 @@ void Interpreter::cycle()
     dispatchOnThisBytecode();
 }
 
+void Interpreter::onEvent()
+{
+    OOP sema = memory->getRegister(InputSemaphore);
+    if( sema )
+    {
+        asynchronousSignal(sema);
+    }else
+        Display::inst()->nextEvent();
+}
+
 void Interpreter::checkProcessSwitch()
 {
-    while( semaphoreIndex > 0 )
+    while( !semaphoreList.isEmpty() )
     {
-        synchronousSignal( semaphoreList[semaphoreIndex] );
-        semaphoreIndex--;
+        synchronousSignal( semaphoreList.back() );
+        semaphoreList.pop_back();
     }
     if( newProcessWaiting )
     {
-        semaphoreIndex = false;
-        OOP activeProcess_ = memory->getRegister(activeProcess());
+        newProcessWaiting = false;
+        OOP activeProcess_ = activeProcess();
         if( activeProcess_ )
             memory->storePointerOfObject(SuspendedContextIndex, activeProcess_, memory->getRegister(ActiveContext));
         memory->storePointerOfObject(ActiveProcessIndex, schedulerPointer(), memory->getRegister(NewProcess) );
         newActiveContext( memory->fetchPointerOfObject( SuspendedContextIndex, memory->getRegister(NewProcess) ));
+        memory->setRegister(NewProcess, 0);
     }
 }
 
@@ -375,7 +393,7 @@ void Interpreter::dispatchOnThisBytecode()
     else if( b >= 144 && b <= 175 )
         jumpBytecode();
     else if( b >= 138 && b <= 143 )
-        qWarning() << "WARNING: hit unused bytecode" << b;
+        qWarning() << "WARNING: running unused bytecode" << b;
 }
 
 bool Interpreter::stackBytecode()
@@ -475,7 +493,7 @@ bool Interpreter::jumpBytecode()
 bool Interpreter::pushReceiverVariableBytecode()
 {
     OOP receiver = memory->getRegister(Receiver);
-    ST_TRACE_BYTECODE("receiver" << memory->prettyValue(val).constData());
+    ST_TRACE_BYTECODE("receiver" << memory->prettyValue(receiver).constData());
     push( memory->fetchPointerOfObject( currentBytecode & 0xf, receiver ) );
     // "Push Receiver Variable #%1").arg( b & 0xf ), 1 );
     return true;
@@ -537,9 +555,13 @@ bool Interpreter::pushReceiverBytecode()
     return true;
 }
 
+static const char* s_constNames[] =
+{
+    "???", "true", "false", "nil", "-1", "0", "1", "2"
+};
 bool Interpreter::pushConstantBytecode()
 {
-    ST_TRACE_BYTECODE("");
+    ST_TRACE_BYTECODE("const" << s_constNames[currentBytecode & 0x7]);
     // "Push (receiver, true, false, nil, -1, 0, 1, 2) [%1]").arg( b & 0x7 ), 1 );
     switch( currentBytecode )
     {
@@ -872,6 +894,10 @@ bool Interpreter::primitiveResponse()
 void Interpreter::activateNewMethod()
 {
     level++;
+#ifdef ST_TRACE_SYSTEM_ERRORS
+    if( memory->getRegister(MessageSelector ) == 0x11a ) // error:
+        qCritical() << "ERROR:" << memory->fetchByteArray(stackTop());
+#endif
     quint16 contextSize = TempFrameStart;
     OOP newMethod = memory->getRegister(NewMethod);
     if( memory->largeContextFlagOf( newMethod ) )
@@ -879,6 +905,7 @@ void Interpreter::activateNewMethod()
     else
         contextSize += 12;
     OOP newContext = memory->instantiateClassWithPointers(ObjectMemory2::classMethodContext,contextSize);
+    // qDebug() << "new MethodContext for method" << QByteArray::number(newMethod,16).constData() << "level" << level; // TEST
     OOP activeContext = memory->getRegister(ActiveContext);
     memory->storePointerOfObject(SenderIndex, newContext, activeContext );
     storeInstructionPointerValueInContext( memory->initialInstructionPointerOfMethod( newMethod ), newContext );
@@ -937,7 +964,7 @@ void Interpreter::returnValue(Interpreter::OOP resultPointer, Interpreter::OOP c
                        memory->prettyValue(activeContext).constData());
 
 #ifdef ST_DO_TRACING
-    if( memory->fetchClassOf(active) != ObjectMemory2::classBlockContext )
+    if( memory->fetchClassOf(activeContext) != ObjectMemory2::classBlockContext )
         level--;
 #endif
 
@@ -1202,8 +1229,8 @@ void Interpreter::primitiveMakePoint()
 
     OOP integerArgument = popStack();
     OOP integerReceiver = popStack();
-    successUpdate( memory->isIntegerValue(integerArgument) );
-    successUpdate( memory->isIntegerValue(integerReceiver) );
+    successUpdate( memory->isIntegerObject(integerArgument) ); // BB error; apparently arg is an OOP, see also primitiveMousePoint
+    successUpdate( memory->isIntegerObject(integerReceiver) );
 
     if( success )
     {
@@ -1508,32 +1535,22 @@ void Interpreter::dispatchInputOutputPrimitives()
     switch( primitiveIndex )
     {
     case 90:
-        //primitiveMousePoint();
-        qWarning() << "WARNING: primitiveMousePoint not yet implemented";
-        primitiveFail();
+        primitiveMousePoint();
         break;
     case 91:
-        //primitiveCursorLocPut();
-        qWarning() << "WARNING: primitiveCursorLocPut not yet implemented";
-        primitiveFail();
+        primitiveCursorLocPut();
         break;
     case 92:
         primitiveCursorLink();
         break;
     case 93:
-        //primitiveInputSemaphore();
-        qWarning() << "WARNING: primitiveInputSemaphore not yet implemented";
-        primitiveFail();
+        primitiveInputSemaphore();
         break;
     case 94:
-        //primitiveSamleInterval();
-        qWarning() << "WARNING: primitiveSamleInterval not yet implemented";
-        primitiveFail();
+        primitiveSamleInterval();
         break;
     case 95:
-        //primitiveInputWord();
-        qWarning() << "WARNING: primitiveInputWord not yet implemented";
-        primitiveFail();
+        primitiveInputWord();
         break;
     case 96:
         primitiveCopyBits();
@@ -1563,6 +1580,30 @@ void Interpreter::dispatchInputOutputPrimitives()
         primitiveBeDisplay();
         break;
     case 103:
+#ifdef ST_TRACE_SYSTEM_ERRORS_
+        if( stackTop() == ObjectMemory2::objectTrue )
+        {
+            /* Stack: argumentCount = 6
+             * 0 6 bool display
+             * 1 5 a Array stops
+             * 2 4 a ShortInteger rightX
+             * 3 3 a String sourceString
+             * 4 2 a ShortInteger stopIndex
+             * 5 1 a ShortInteger startIndex
+             */
+            QByteArray str = memory->fetchByteArray( stackValue(3), true );
+            const int pos = str.indexOf( "**System Error" );
+            if( pos != -1 )
+            {
+                QByteArray substr = str.mid(pos);
+                if( substr != prevMsg )
+                {
+                    qCritical() << substr.constData();
+                    prevMsg = substr;
+                }
+            }
+        }
+#endif
         //primitiveScanCharacters();
         primitiveFail(); // optional primitive not implemented
         break;
@@ -1605,8 +1646,7 @@ void Interpreter::dispatchSystemPrimitives()
         pushInteger( memory->getOopsLeft() );
         break;
     case 116:
-        qWarning() << "WARNING: primitiveSignalAtOopsLeftWordsLeft not yet implemnted";
-        //primitiveSignalAtOopsLeftWordsLeft();
+        primitiveSignalAtOopsLeftWordsLeft();
         break;
     default:
         primitiveFail();
@@ -1843,7 +1883,7 @@ float Interpreter::popFloat()
     if( success )
         return memory->fetchFloat(f);
     else
-        return 0.0;
+        return NAN;
 }
 
 void Interpreter::pushFloat(float v)
@@ -2280,9 +2320,10 @@ void Interpreter::primitiveValueWithArgs()
 
 void Interpreter::primitivePerform()
 {
-    ST_TRACE_PRIMITIVE("");
     OOP performSelector = memory->getRegister(MessageSelector);
-    memory->setRegister(MessageSelector, stackValue(argumentCount-1));
+    OOP newSelector = stackValue(argumentCount-1);
+    memory->setRegister(MessageSelector, newSelector);
+    ST_TRACE_PRIMITIVE("selector" << memory->prettyValue(newSelector).constData());
     OOP newReceiver = stackValue(argumentCount);
     lookupMethodInClass( memory->fetchClassOf(newReceiver) );
     successUpdate( memory->argumentCountOf( memory->getRegister(NewMethod) ) == argumentCount - 1 );
@@ -2382,8 +2423,7 @@ void Interpreter::primitiveFlushCache()
 
 void Interpreter::asynchronousSignal(Interpreter::OOP aSemaphore)
 {
-    semaphoreIndex++;
-    semaphoreList.append(aSemaphore);
+    semaphoreList.push_back(aSemaphore);
 }
 
 bool Interpreter::isEmptyList(Interpreter::OOP aLinkedList)
@@ -2446,9 +2486,8 @@ Interpreter::OOP Interpreter::firstContext()
 void Interpreter::addLastLinkToList(Interpreter::OOP aLink, Interpreter::OOP aLinkedList)
 {
     if( isEmptyList( aLinkedList ) )
-    {
         memory->storePointerOfObject( FirstLinkIndex, aLinkedList, aLink );
-    }else
+    else
     {
         OOP lastLink = memory->fetchPointerOfObject( LastLinkIndex, aLinkedList );
         memory->storePointerOfObject( NextLinkIndex, lastLink, aLink );
@@ -2483,13 +2522,13 @@ void Interpreter::sleep(Interpreter::OOP aProcess)
 
 void Interpreter::resume(Interpreter::OOP aProcess)
 {
-    OOP activeProc = activeProcess();
-    int activePriority = fetchIntegerOfObject( PriorityIndex, activeProc );
+    OOP activeProcess_ = activeProcess();
+    int activePriority = fetchIntegerOfObject( PriorityIndex, activeProcess_ );
     int newPriority = fetchIntegerOfObject( PriorityIndex, aProcess );
     if( newPriority > activePriority )
     {
-        sleep( activeProc );
-        transferTo( activeProc );
+        sleep( activeProcess_ );
+        transferTo( aProcess );
     }else
         sleep( aProcess );
 }
@@ -2630,6 +2669,64 @@ void Interpreter::primitiveCursorLink()
 {
     qWarning() << "WARNING: primitiveCursorLink not supported" << memory->prettyValue(stackTop());
     pop(1); // bool
+}
+
+void Interpreter::primitiveInputSemaphore()
+{
+    memory->setRegister( InputSemaphore, popStack() );
+}
+
+void Interpreter::primitiveInputWord()
+{
+    pop(1);
+    push( positive16BitIntegerFor( Display::inst()->nextEvent() ) );
+}
+
+void Interpreter::primitiveSamleInterval()
+{
+    qWarning() << "WARNING: primitiveSamleInterval not yet implemented";
+    primitiveFail();
+}
+
+static qint16 cropPoint( int pos )
+{
+    if( pos > 16383 )
+        pos = 16383;
+    else if( pos < -16384 )
+        pos = -16384;
+    return pos;
+}
+
+void Interpreter::primitiveMousePoint()
+{
+#if 0
+    QPoint pos = Display::inst()->getMousePos();
+
+    OOP point = memory->instantiateClassWithPointers( ObjectMemory2::classPoint, ClassPointSize );
+    memory->storePointerOfObject( XIndex, point, memory->integerObjectOf(cropPoint(pos.x())) );
+    memory->storePointerOfObject( YIndex, point, memory->integerObjectOf(cropPoint(pos.y())) );
+    push( point );
+#else
+    primitiveFail();
+#endif
+
+}
+
+void Interpreter::primitiveSignalAtOopsLeftWordsLeft()
+{
+    static bool signaled = false;
+    if( !signaled )
+    {
+        signaled = true;
+        qWarning() << "WARNING: primitiveSignalAtOopsLeftWordsLeft not yet implemnted";
+    }
+}
+
+void Interpreter::primitiveCursorLocPut()
+{
+    OOP point = popStack();
+    Display::inst()->setCursorPos( memory->integerValueOf( memory->fetchPointerOfObject( XIndex, point ) ),
+                                   memory->integerValueOf( memory->fetchPointerOfObject( YIndex, point ) ) );
 }
 
 void Interpreter::primitiveQuo()
@@ -2789,19 +2886,20 @@ void Interpreter::primitiveTruncated()
     ST_TRACE_PRIMITIVE("");
     const float floatReceiver = popFloat();
     const qint32 res = floatReceiver;
-    successUpdate( ( res & 0x7fff8000 ) == 0 );
+    successUpdate( memory->isIntegerValue( res ) );
     if( success )
         pushInteger(res);
     else
         unPop(1);
-
 }
 
 void Interpreter::primitiveFractionalPart()
 {
-    ST_TRACE_PRIMITIVE("");
-    qWarning() << "WARNING: primitiveFractionalPart not yet implemented";
-    primitiveFail(); // TODO
+    float floatReceiver = popFloat();
+    if( success )
+        pushFloat( floatReceiver - (int) floatReceiver );
+    else
+        unPop(1);
 }
 
 void Interpreter::primitiveExponent()
