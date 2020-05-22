@@ -26,8 +26,13 @@
 
 namespace St
 {
-    // This is a textbook implementation according to Blue Book part 4.
+    // This is a textbook implementation according to Blue Book (BB) part 4.
     // Known to be inefficient; focus is on functionality and compliance.
+
+    // originally implemented according to this version of the BB:
+    //      http://stephane.ducasse.free.fr/FreeBooks/BlueBook/Bluebook.pdf
+    // later code reviewed based on this version: http://www.mirandabanda.org/bluebook/
+    //      and on the "Smalltalk-80 Virtual Image Version 2" (VIM) manual
 
     class Interpreter : public QObject
     {
@@ -137,7 +142,7 @@ namespace St
         bool pushLiteralConstantBytecode();
         bool pushLiteralVariableBytecode();
         bool storeAndPopReceiverVariableBytecode();
-        bool storeAndPopTemoraryVariableBytecode();
+        bool storeAndPopTemporaryVariableBytecode();
         bool pushReceiverBytecode();
         bool pushConstantBytecode();
         bool extendedPushBytecode();
@@ -174,7 +179,7 @@ namespace St
         OOP primitiveFail();
         qint16 popInteger();
         void pushInteger(qint16);
-        OOP positive16BitIntegerFor(int);
+        OOP positive16BitIntegerFor(quint16);
         int positive16BitValueOf(OOP);
         void arithmeticSelectorPrimitive();
         void commonSelectorPrimitive();
@@ -299,6 +304,23 @@ namespace St
         void primitiveMousePoint();
         void primitiveSignalAtOopsLeftWordsLeft();
         void primitiveCursorLocPut();
+        static inline quint16 extractBits( quint8 from, quint8 to, quint16 of )
+        {
+            Q_ASSERT( from <= to && to <= 15 );
+            return ( of >> ( 15 - to ) ) & ( ( 1 << ( to - from + 1 ) ) - 1 );
+        }
+        static inline quint16 lowByteOf( quint16 anInteger )
+        {
+            return extractBits( 8, 15, anInteger );
+        }
+        static inline quint16 highByteOf( quint16 anInteger )
+        {
+            return extractBits( 0, 7, anInteger );
+        }
+        static inline quint16 literalCountOfHeader(OOP headerPointer )
+        {
+            return extractBits( 9, 14, headerPointer );
+        }
     private:
         ObjectMemory2* memory;
         qint16 stackPointer, instructionPointer, argumentCount, primitiveIndex;

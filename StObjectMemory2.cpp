@@ -356,7 +356,7 @@ void ObjectMemory2::storePointerOfObject(quint16 fieldIndex, OOP objectPointer, 
     Q_ASSERT( objectPointer != 0 );
     const OtSlot& s = getSlot(objectPointer);
     const quint32 off = fieldIndex * 2;
-    Q_ASSERT( ( off + 1 ) < s.byteLen() );
+    Q_ASSERT( fieldIndex < s.d_size );
     writeU16( s.d_obj->d_data, off, withValue );
 }
 
@@ -364,7 +364,7 @@ quint16 ObjectMemory2::fetchWordOfObject(quint16 fieldIndex, OOP objectPointer) 
 {
     const OtSlot& s = getSlot(objectPointer);
     const quint32 off = fieldIndex * 2;
-    Q_ASSERT( ( off + 1 ) < s.byteLen() );
+    Q_ASSERT( fieldIndex < s.d_size );
     return readU16( s.d_obj->d_data, off );
 }
 
@@ -372,7 +372,7 @@ void ObjectMemory2::storeWordOfObject(quint16 fieldIndex, OOP objectPointer, qui
 {
     const OtSlot& s = getSlot(objectPointer);
     const quint32 off = fieldIndex * 2;
-    Q_ASSERT( ( off + 1 ) < s.byteLen() );
+    Q_ASSERT( fieldIndex < s.d_size );
     writeU16( s.d_obj->d_data, off, withValue );
 }
 
@@ -498,7 +498,7 @@ void ObjectMemory2::storeFloat(ObjectMemory2::OOP objectPointer, float v)
     storeWordOfObject(1,objectPointer, w & 0xffff );
 }
 
-void ObjectMemory2::swapPointersOf(ObjectMemory2::OOP firstPointer, ObjectMemory2::OOP secondPointer)
+void ObjectMemory2::swapPointersOf(OOP firstPointer, OOP secondPointer)
 {
     const quint32 i1 = firstPointer >> 1;
     const quint32 i2 = secondPointer >> 1;
@@ -576,11 +576,6 @@ quint8 ObjectMemory2::literalCountOf(OOP methodPointer) const
     const OtSlot& s = getSlot(methodPointer);
     Q_ASSERT( s.getClass() == ObjectMemory2::classCompiledMethod );
     return getLiteralByteCount( s.d_obj->d_data ) / 2;
-}
-
-quint8 ObjectMemory2::literalCountOfHeader(OOP header) const
-{
-    return ( ( header >> 1 ) & 0x3f ); // TODO: check
 }
 
 ObjectMemory2::ByteString ObjectMemory2::methodBytecodes(OOP methodPointer) const

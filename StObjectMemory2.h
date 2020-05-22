@@ -150,7 +150,6 @@ namespace St
         CompiledMethodFlags flagValueOf( OOP methodPointer ) const;
         bool largeContextFlagOf( OOP methodPointer ) const;
         quint8 literalCountOf( OOP methodPointer ) const;
-        quint8 literalCountOfHeader(OOP header ) const;
         ByteString methodBytecodes( OOP methodPointer ) const;
         quint8 argumentCountOf(OOP methodPointer ) const;
         quint8 primitiveIndexOf(OOP methodPointer ) const;
@@ -225,7 +224,7 @@ namespace St
 
     const ObjectMemory2::OtSlot& ObjectMemory2::getSlot(ObjectMemory2::OOP oop) const
     {
-        const quint32 i = oop >> 1;
+        const int i = oop >> 1;
         Q_ASSERT( i < d_ot.d_slots.size() );
         return d_ot.d_slots[i];
     }
@@ -234,7 +233,7 @@ namespace St
     {
         const OtSlot& s = getSlot(objectPointer);
         const quint32 off = fieldIndex * 2;
-        Q_ASSERT( ( off + 1 ) < s.byteLen() ); // removed isPtr check
+        Q_ASSERT( fieldIndex < s.d_size );
         const OOP oop = readU16( s.d_obj->d_data, off );
         if( oop == 0 ) // BB (implicitly?) assumes that unused members are nil
             return objectNil;

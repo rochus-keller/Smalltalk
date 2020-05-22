@@ -25,7 +25,7 @@
 using namespace St;
 
 //#define ST_DO_TRACING
-//#define ST_DO_TRACE2
+#define ST_DO_TRACE2
 #define ST_TRACE_SYSTEM_ERRORS
 
 #ifdef ST_DO_TRACING
@@ -300,6 +300,7 @@ bool Interpreter::lookupMethodInClass(Interpreter::OOP cls)
     memory->setRegister(MessageSelector, ObjectMemory2::symbolDoesNotUnderstand );
     qCritical() << "ERROR: class" << memory->prettyValue(cls) << "doesNotUnderstand"
                 << memory->prettyValue( selector );
+    // exit(-1);
     return lookupMethodInClass(cls);
 }
 
@@ -410,7 +411,7 @@ bool Interpreter::stackBytecode()
     if( b >= 96 && b <= 103 )
         return storeAndPopReceiverVariableBytecode();
     if( b >= 104 && b <= 111 )
-        return storeAndPopTemoraryVariableBytecode();
+        return storeAndPopTemporaryVariableBytecode();
     if( b == 112 )
         return pushReceiverBytecode();
     if( b >= 113 && b <= 119 )
@@ -494,15 +495,15 @@ bool Interpreter::pushReceiverVariableBytecode()
 {
     OOP receiver = memory->getRegister(Receiver);
     ST_TRACE_BYTECODE("receiver" << memory->prettyValue(receiver).constData());
-    push( memory->fetchPointerOfObject( currentBytecode & 0xf, receiver ) );
+    push( memory->fetchPointerOfObject( extractBits( 12, 15, currentBytecode ), receiver ) );
     // "Push Receiver Variable #%1").arg( b & 0xf ), 1 );
     return true;
 }
 
 bool Interpreter::pushTemporaryVariableBytecode()
 {
-    int var = currentBytecode & 0xf;
-    OOP val = temporary( var );
+    const quint16 var = extractBits( 12, 15, currentBytecode );
+    const OOP val = temporary( var );
     ST_TRACE_BYTECODE( "variable" << var << "value" << memory->prettyValue(val).constData() );
     // "Push Temporary Location #%1").arg( b & 0xf ), 1 );
     push( val );
@@ -511,11 +512,12 @@ bool Interpreter::pushTemporaryVariableBytecode()
 
 bool Interpreter::pushLiteralConstantBytecode()
 {
-    OOP lit = literal( currentBytecode & 0x1f );
-    ST_TRACE_BYTECODE( "literal" << (currentBytecode & 0x1f) << "value" << memory->prettyValue(lit).constData() <<
+    const quint16 fieldIndex = extractBits( 11, 15, currentBytecode );
+    const OOP literalConstant = literal( fieldIndex );
+    ST_TRACE_BYTECODE( "literal" << fieldIndex << "value" << memory->prettyValue(literalConstant).constData() <<
                        "of method" << QByteArray::number( memory->getRegister(Method), 16 ).constData() );
     // "Push Literal Constant #%1").arg( b & 0x1f ), 1 );
-    push( lit );
+    push( literalConstant );
     return true;
 }
 
@@ -523,11 +525,12 @@ static const quint16 ValueIndex = 1;
 
 bool Interpreter::pushLiteralVariableBytecode()
 {
-    OOP assoc = literal( currentBytecode & 0x1f );
-    ST_TRACE_BYTECODE("literal" << (currentBytecode & 0x1f) << "value" << memory->prettyValue(assoc).constData() <<
+    const quint16 fieldIndex = extractBits( 11, 15, currentBytecode );
+    const OOP association = literal( fieldIndex );
+    ST_TRACE_BYTECODE("literal" << fieldIndex << "value" << memory->prettyValue(association).constData() <<
                       "of method" << QByteArray::number( memory->getRegister(Method), 16 ).constData());
     // "Push Literal Variable #%1").arg( b & 0x1f ), 1 );
-    push( memory->fetchPointerOfObject( ValueIndex, assoc ) );
+    push( memory->fetchPointerOfObject( ValueIndex, association ) );
     return true;
 }
 
@@ -535,15 +538,17 @@ bool Interpreter::storeAndPopReceiverVariableBytecode()
 {
     ST_TRACE_BYTECODE("");
     // "Pop and Store Receiver Variable #%1").arg( b & 0x7 ), 1 );
-    memory->storePointerOfObject( currentBytecode  & 0x7, memory->getRegister(Receiver), popStack() );
+    const quint16 variableIndex = extractBits( 13, 15, currentBytecode );
+    memory->storePointerOfObject( variableIndex, memory->getRegister(Receiver), popStack() );
     return true;
 }
 
-bool Interpreter::storeAndPopTemoraryVariableBytecode()
+bool Interpreter::storeAndPopTemporaryVariableBytecode()
 {
     ST_TRACE_BYTECODE("");
     // "Pop and Store Temporary Location #%1").arg( b & 0x7 ), 1 );
-    memory->storePointerOfObject( ( currentBytecode & 0x7 ) + TempFrameStart, memory->getRegister(HomeContext), popStack() );
+    const quint16 variableIndex = extractBits( 13, 15, currentBytecode );
+    memory->storePointerOfObject( variableIndex + TempFrameStart, memory->getRegister(HomeContext), popStack() );
     return true;
 }
 
@@ -599,8 +604,8 @@ bool Interpreter::extendedPushBytecode()
     // "Push (Receiver Variable, Temporary Location, Literal Constant, Literal Variable) [%1] #%2").
                               // arg( ( bc[pc+1] >> 6 ) & 0x3 ).arg( bc[pc+1] & 0x3f), 2 );
     const quint16 descriptor = fetchByte();
-    const quint8 variableType = ( descriptor >> 6 & 0x3 );
-    const quint8 variableIndex = descriptor & 0x3f;
+    const quint16 variableType = extractBits( 8, 9, descriptor );
+    const quint16 variableIndex = extractBits( 10, 15, descriptor );
     switch( variableType )
     {
     case 0:
@@ -630,8 +635,8 @@ bool Interpreter::extendedStoreBytecode(bool subcall)
     // "Store (Receiver Variable, Temporary Location, Illegal, Literal Variable) [%1] #%2").
                               // arg( ( bc[pc+1] >> 6 ) & 0x3 ).arg( bc[pc+1] & 0x3f), 2 );
     const quint16 descriptor = fetchByte();
-    const quint16 variableType = ( descriptor >> 6 ) & 0x3;
-    const quint16 variableIndex = descriptor & 0x3f;
+    const quint16 variableType = extractBits( 8, 9, descriptor );
+    const quint16 variableIndex = extractBits( 10, 15, descriptor );
     switch( variableType )
     {
     case 0:
@@ -693,7 +698,7 @@ bool Interpreter::shortUnconditionalJump()
 {
     ST_TRACE_BYTECODE("");
      // "Jump %1 + 1 (i.e., 1 through 8)").arg( b & 0x7 ), 1 );
-    const quint32 offset = currentBytecode & 0x7;
+    const quint16 offset = extractBits( 13, 15, currentBytecode );
     jump( offset + 1 );
     return true;
 }
@@ -702,7 +707,7 @@ bool Interpreter::shortContidionalJump()
 {
     ST_TRACE_BYTECODE("");
     // "Pop and Jump 0n False %1 +1 (i.e., 1 through 8)").arg( b & 0x7 ), 1 );
-    const quint32 offset = currentBytecode & 0x7;
+    const quint16 offset = extractBits( 13, 15, currentBytecode );
     jumpif( ObjectMemory2::objectFalse, offset + 1 );
     return true;
 }
@@ -711,7 +716,7 @@ bool Interpreter::longUnconditionalJump()
 {
     ST_TRACE_BYTECODE("");
     // "Jump(%1 - 4) *256+%2").arg( b & 0x7 ).arg( bc[pc+1] ), 2 );
-    const quint32 offset = currentBytecode & 0x7;
+    const quint16 offset = extractBits( 13, 15, currentBytecode );
     jump( ( offset - 4 ) * 256 + fetchByte() );
     return true;
 }
@@ -722,7 +727,7 @@ bool Interpreter::longConditionalJump()
     // "Pop and Jump On True %1 *256+%2").arg( b & 0x3 ).arg( bc[pc+1] ), 2 );
     // "Pop and Jump On False %1 *256+%2").arg( b & 0x3 ).arg( bc[pc+1] ), 2 );
 
-    quint32 offset = currentBytecode & 0x3;
+    quint16 offset = extractBits( 14, 15, currentBytecode );
     offset = offset * 256 + fetchByte();
     if( currentBytecode >= 168 && currentBytecode <= 171 )
         jumpif( ObjectMemory2::objectTrue, offset );
@@ -753,9 +758,12 @@ bool Interpreter::singleExtendedSendBytecode()
 {
     ST_TRACE_BYTECODE("");
     // "Send Literal Selector #%2 With %1 Arguments").arg( ( bc[pc+1] >> 5 ) & 0x7 ).arg( bc[pc+1] & 0x1f), 2 );
-    const quint8 descriptor = fetchByte();
-    const quint8 selectorIndex = descriptor & 0x1f;
-    sendSelector( literal(selectorIndex), ( descriptor >> 5 ) & 0x7 );
+    const quint16 descriptor = fetchByte();
+    const quint16 selectorIndex = extractBits( 11, 15, descriptor );
+    //Q_ASSERT( selectorIndex == ( descriptor & 0x1f ) );
+    const quint16 _argumentCount = extractBits( 8, 10, descriptor );
+    //Q_ASSERT( tmp == ( ( descriptor >> 5 ) & 0x7 ) );
+    sendSelector( literal(selectorIndex), _argumentCount );
     return true;
 }
 
@@ -773,12 +781,12 @@ bool Interpreter::singleExtendedSuperBytecode()
 {
     ST_TRACE_BYTECODE("");
     // "Send Literal Selector #%2 To Superclass With %1 Arguments").arg( ( bc[pc+1] >> 5 ) & 0x7 ).arg( bc[pc+1] & 0x1f), 2 );
-    const quint8 descriptor = fetchByte();
-    argumentCount = ( descriptor >> 5 ) & 0x7;
-    const quint16 selectorIndex = descriptor & 0x1f;
+    const quint16 descriptor = fetchByte();
+    argumentCount = extractBits( 8, 10, descriptor );
+    const quint16 selectorIndex = extractBits( 11, 15, descriptor );
     memory->setRegister( MessageSelector, literal( selectorIndex ));
-    OOP method = memory->getRegister(Method);
-    OOP methodClass = memory->methodClassOf( method );
+    const OOP method = memory->getRegister(Method);
+    const OOP methodClass = memory->methodClassOf( method );
     sendSelectorToClass( superclassOf(methodClass) );
     return true;
 }
@@ -815,10 +823,11 @@ bool Interpreter::sendLiteralSelectorBytecode()
     // "Send Literal Selector #%1 With No Arguments" ).arg( b & 0xf ), 1 );
     // "Send Literal Selector #%1 With 1 Argument" ).arg( b & 0xf ), 1 );
     // "Send Literal Selector #%1 With 2 Arguments" ).arg( b & 0xf ), 1 );
-    OOP selector = literal( currentBytecode & 0xf );
-    int args = ( ( currentBytecode >> 4 ) & 0x3 ) - 1;
-    ST_TRACE_BYTECODE( "literal" << ( currentBytecode & 0xf ) << memory->prettyValue(selector).constData() << "args" << args);
-    sendSelector( selector, args );
+    const quint16 litNr = extractBits( 12, 15, currentBytecode );
+    const OOP selector = literal( litNr );
+    const quint16 argumentCount = extractBits( 10, 11, currentBytecode ) - 1;
+    ST_TRACE_BYTECODE( "literal" << litNr << memory->prettyValue(selector).constData() << "args" << argumentCount);
+    sendSelector( selector, argumentCount );
     return true;
 }
 
@@ -896,7 +905,10 @@ void Interpreter::activateNewMethod()
     level++;
 #ifdef ST_TRACE_SYSTEM_ERRORS
     if( memory->getRegister(MessageSelector ) == 0x11a ) // error:
+    {
         qCritical() << "ERROR:" << memory->fetchByteArray(stackTop());
+        // exit(-1);
+    }
 #endif
     quint16 contextSize = TempFrameStart;
     OOP newMethod = memory->getRegister(NewMethod);
@@ -1018,29 +1030,31 @@ void Interpreter::pushInteger(qint16 integerValue)
     push( memory->integerObjectOf(integerValue));
 }
 
-Interpreter::OOP Interpreter::positive16BitIntegerFor(int integerValue)
+Interpreter::OOP Interpreter::positive16BitIntegerFor(quint16 integerValue)
 {
-    if( integerValue < 0 )
-        return primitiveFail();
-    if( memory->isIntegerValue(integerValue) )
+    if( extractBits( 0, 1, integerValue ) == 0 ) // BB error, fixed like VIM
         return memory->integerObjectOf(integerValue);
+
     OOP newLargeInteger = memory->instantiateClassWithBytes(ObjectMemory2::classLargePositiveInteger, 2);
-    Q_ASSERT( memory->fetchByteLenghtOf( newLargeInteger ) == 2 );
-    memory->storeByteOfObject( 0, newLargeInteger, integerValue & 0xff );
-    memory->storeByteOfObject( 1, newLargeInteger, ( integerValue >> 8 ) & 0xff );
+
+    memory->storeByteOfObject( 0, newLargeInteger, lowByteOf( integerValue ) );
+    memory->storeByteOfObject( 1, newLargeInteger, highByteOf( integerValue ) );
     return newLargeInteger;
 }
 
-int Interpreter::positive16BitValueOf(Interpreter::OOP integerPointer)
+int Interpreter::positive16BitValueOf(OOP integerPointer)
 {
     if( memory->isIntegerObject(integerPointer) )
         return memory->integerValueOf(integerPointer);
+
     if( memory->fetchClassOf(integerPointer) != ObjectMemory2::classLargePositiveInteger )
         return primitiveFail();
+
     if( memory->fetchByteLenghtOf(integerPointer) != 2 )
         return primitiveFail();
-    int value = memory->fetchByteOfObject(1, integerPointer) << 8;
-    value += memory->fetchByteOfObject(0, integerPointer);
+
+    int value = memory->fetchByteOfObject(1, integerPointer);
+    value = value * 256 + memory->fetchByteOfObject(0, integerPointer);
     return value;
 }
 
@@ -1205,6 +1219,15 @@ void Interpreter::primitiveDivide()
         unPop(2);
 }
 
+static int MOD(int a, int b) // Source: http://lists.inf.ethz.ch/pipermail/oberon/2019/013353.html
+{
+    Q_ASSERT( b > 0 );
+    if (a < 0)
+        return (b - 1) + ((a - b + 1)) % b;
+    else
+        return a % b;
+}
+
 void Interpreter::primitiveMod()
 {
     ST_TRACE_PRIMITIVE("");
@@ -1214,7 +1237,7 @@ void Interpreter::primitiveMod()
     qint16 integerResult = 0;
     if( success )
     {
-        integerResult = integerReceiver % integerArgument; // TODO quotient always rounded down towards negative infinity?
+        integerResult = MOD(integerReceiver,integerArgument); // TODO validate
         successUpdate( memory->isIntegerValue(integerResult) );
     }
     if( success )
@@ -1240,7 +1263,11 @@ void Interpreter::primitiveMakePoint()
         push( pointResult );
     }
     else
+    {
+        // qDebug() << memory->prettyValue(integerArgument) << memory->prettyValue(integerReceiver);
+        // everytime we arrived here so far integerArgument and integerReceiver were Float
         unPop(2);
+    }
 }
 
 void Interpreter::primitiveBitShift()
@@ -1261,6 +1288,14 @@ void Interpreter::primitiveBitShift()
         unPop(2);
 }
 
+static int DIV(int a, int b) // Source: http://lists.inf.ethz.ch/pipermail/oberon/2019/013353.html
+{
+    if (a < 0)
+        return (a - b + 1) / b;
+    else
+        return a / b;
+}
+
 void Interpreter::primitiveDiv()
 {
     ST_TRACE_PRIMITIVE("");
@@ -1270,7 +1305,7 @@ void Interpreter::primitiveDiv()
     qint16 integerResult = 0;
     if( success )
     {
-        integerResult = integerReceiver / integerArgument; // TODO quotient always rounded down towards negative infinity?
+        integerResult = DIV( integerReceiver, integerArgument ); // TODO validate
         successUpdate( memory->isIntegerValue(integerResult) );
     }
     if( success )
@@ -1977,7 +2012,7 @@ void Interpreter::primitiveStringAtPut()
     if( success )
         push(character);
     else
-        unPop(3);
+        unPop(3); // BB error, VIM fixed
 }
 
 void Interpreter::primitiveNext()
@@ -2088,7 +2123,7 @@ Interpreter::OOP Interpreter::subscriptWith(Interpreter::OOP array, int index)
             return memory->fetchPointerOfObject(index-1,array);
         else
         {
-            int value = memory->fetchWordOfObject(index-1,array);
+            const quint16 value = memory->fetchWordOfObject(index-1,array);
             return positive16BitIntegerFor(value);
         }
     }else
@@ -2104,19 +2139,19 @@ void Interpreter::subscriptWithStoring(Interpreter::OOP array, int index, Interp
     if( isWords(cls) )
     {
         if( isPointers(cls) )
-        {
             memory->storePointerOfObject(index-1, array, value );
-        }else
+        else
         {
             successUpdate( memory->isIntegerObject(value) );
             if( success )
-                memory->storeWordOfObject(index-1,array,positive16BitValueOf(value) );
+                memory->storeWordOfObject(index-1, array, positive16BitValueOf(value) );
+            // else never observed so far
         }
     }else
     {
         successUpdate( memory->isIntegerObject(value) );
         if( success )
-            memory->storeByteOfObject(index-1,array, memory->integerValueOf(value) & 0xff );
+            memory->storeByteOfObject(index-1, array, lowByteOf( memory->integerValueOf(value) ) );
     }
 }
 
@@ -2126,7 +2161,7 @@ void Interpreter::primitiveObjectAt()
     qint16 index = popInteger();
     OOP thisReceiver = popStack();
     successUpdate( index > 0);
-    successUpdate( index <= ( memory->objectPointerCountOf(thisReceiver) ) );
+    successUpdate( index <= memory->objectPointerCountOf(thisReceiver) );
     if( success )
         push( memory->fetchPointerOfObject(index-1, thisReceiver) );
     else
@@ -2186,11 +2221,14 @@ void Interpreter::primitiveNewWithArg()
 
 void Interpreter::primitiveBecome()
 {
+    // primitive 72
+    // called for a DisplayScreen and a Set
     ST_TRACE_PRIMITIVE("");
     OOP otherPointer = popStack();
     OOP thisReceiver = popStack();
     successUpdate( !memory->isIntegerObject(otherPointer) );
     successUpdate( !memory->isIntegerObject(thisReceiver) );
+    // qDebug() << "primitiveBecome" << memory->prettyValue(thisReceiver) << memory->prettyValue(otherPointer);
     if( success )
     {
         memory->swapPointersOf(thisReceiver,otherPointer);
@@ -2277,17 +2315,23 @@ void Interpreter::primitiveNextInstance()
 
 void Interpreter::primitiveNewMethod()
 {
+    // primitive 79
     ST_TRACE_PRIMITIVE("");
-    OOP header = popStack();
-    int bytecodeCount = popInteger();
-    OOP cls = popStack();
-    int size = memory->literalCountOfHeader(header) + 2 + bytecodeCount;
-    push( memory->instantiateClassWithBytes(cls,size) );
+    const OOP header = popStack();
+    const int bytecodeCount = popInteger();
+    const OOP cls = popStack();
+    const int literalCount = literalCountOfHeader(header);
+    const int size = ( literalCount + 1 ) * 2 + bytecodeCount;
+    OOP newMethod = memory->instantiateClassWithBytes(cls,size);
+    memory->storeWordOfObject(0, newMethod, header); // BB error: this line got obviously lost
+    for( int i = 0; i < literalCount; i++ )
+        memory->storePointerOfObject(1 + i, newMethod, ObjectMemory2::objectNil );  // BB error, VIM fixed
+    push( newMethod );
 }
 
 void Interpreter::checkInstanceVariableBoundsOf(int index, Interpreter::OOP object)
 {
-    // OOP cls = memory->fetchClassOf(object);
+    // OOP cls = memory->fetchClassOf(object); // BB makes this fetch, but not used
     successUpdate( index >= 1 );
     successUpdate( index <= lengthOf(object));
 }
@@ -2668,7 +2712,7 @@ void Interpreter::primitiveBeCursor()
 void Interpreter::primitiveCursorLink()
 {
     qWarning() << "WARNING: primitiveCursorLink not supported" << memory->prettyValue(stackTop());
-    pop(1); // bool
+    popStack(); // bool
 }
 
 void Interpreter::primitiveInputSemaphore()

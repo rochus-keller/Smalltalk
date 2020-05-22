@@ -195,7 +195,7 @@ void Display::mousePressEvent(QMouseEvent* event)
         postEvent( BiStateOn, 130 );
         break;
     case Qt::RightButton:
-        postEvent( BiStateOn, 129 ); // BB error, mixed up 129 and 128
+        postEvent( BiStateOn, 129 ); // BB error, mixed up 129 and 128, VIM fixed
         break;
     case Qt::MidButton:
         postEvent( BiStateOn, 128 );
@@ -213,7 +213,7 @@ void Display::mouseReleaseEvent(QMouseEvent* event)
         postEvent( BiStateOff, 130 );
         break;
     case Qt::RightButton:
-        postEvent( BiStateOff, 129 ); // BB error, mixed up 129 and 128
+        postEvent( BiStateOff, 129 ); // BB error, mixed up 129 and 128, VIM fixed
         break;
     case Qt::MidButton:
         postEvent( BiStateOff, 128 );
