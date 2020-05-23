@@ -180,7 +180,7 @@ namespace St
         qint16 popInteger();
         void pushInteger(qint16);
         OOP positive16BitIntegerFor(quint16);
-        int positive16BitValueOf(OOP);
+        quint16 positive16BitValueOf(OOP);
         void arithmeticSelectorPrimitive();
         void commonSelectorPrimitive();
         void primitiveAdd();

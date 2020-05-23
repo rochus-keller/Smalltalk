@@ -99,8 +99,8 @@ namespace St
         struct ByteString
         {
             const quint8* d_bytes;
-            quint16 d_byteLen;
-            ByteString(const quint8* b, quint16 l):d_bytes(b),d_byteLen(l){}
+            quint32 d_byteLen;
+            ByteString(const quint8* b, quint32 l):d_bytes(b),d_byteLen(l){}
             quint16 getWordLen() const { return ( d_byteLen + 1 ) / 2; }
         };
 
@@ -170,7 +170,7 @@ namespace St
 
     protected:
         int findFreeSlot();
-        OOP instantiateClass( OOP cls, quint16 byteLen, bool isPtr );
+        OOP instantiateClass(OOP cls, quint32 byteLen, bool isPtr );
         void mark(OOP);
 
         static inline quint16 readU16( const QByteArray& data, int off )
@@ -194,10 +194,10 @@ namespace St
 
         struct OtSlot
         {
-            quint32 d_size : 15; // number of words (16 bit per word)
-            quint32 d_isOdd : 1;
-            quint32 d_class : 15; // NOTE: this is an index, not an OOP!
-            quint32 d_isPtr : 1;
+            quint16 d_size; // number of words (16 bit per word); we need full 16 bit here!
+            quint16 d_class;    // NOTE: this is an index, not an OOP!
+            quint8 d_isOdd : 1;
+            quint8 d_isPtr : 1;
             Object* d_obj;
             OtSlot():d_obj(0),d_size(0),d_isOdd(0),d_class(0),d_isPtr(0) {}
             bool isFree() const { return d_obj == 0; }
@@ -209,7 +209,7 @@ namespace St
         {
             QVector<OtSlot> d_slots;
             ObjectTable():d_slots( 0xffff >> 1 ) {}
-            OtSlot* allocate(quint16 slot, quint16 numOfBytes, OOP cls, bool isPtr );
+            OtSlot* allocate(quint16 slot, quint32 numOfBytes, OOP cls, bool isPtr );
             void free( quint16 slot );
         };
 

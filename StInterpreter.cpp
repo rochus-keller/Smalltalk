@@ -1042,7 +1042,7 @@ Interpreter::OOP Interpreter::positive16BitIntegerFor(quint16 integerValue)
     return newLargeInteger;
 }
 
-int Interpreter::positive16BitValueOf(OOP integerPointer)
+quint16 Interpreter::positive16BitValueOf(OOP integerPointer)
 {
     if( memory->isIntegerObject(integerPointer) )
         return memory->integerValueOf(integerPointer);
@@ -1053,7 +1053,7 @@ int Interpreter::positive16BitValueOf(OOP integerPointer)
     if( memory->fetchByteLenghtOf(integerPointer) != 2 )
         return primitiveFail();
 
-    int value = memory->fetchByteOfObject(1, integerPointer);
+    quint16 value = memory->fetchByteOfObject(1, integerPointer);
     value = value * 256 + memory->fetchByteOfObject(0, integerPointer);
     return value;
 }

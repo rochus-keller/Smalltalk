@@ -317,12 +317,11 @@ bool Display::keyEvent(int keyCode, bool down)
     return false;
 }
 
-Bitmap::Bitmap(quint8* buf, qint16 wordLen, qint16 pixWidth, qint16 pixHeight)
+Bitmap::Bitmap(quint8* buf, quint16 wordLen, quint16 pixWidth, quint16 pixHeight)
 {
     d_buf = buf;
     // Q_ASSERT( wordLen == pixWidth * pixHeight / 16 ); // empirically found to be true
     // Q_ASSERT( d_width >= 16 && d_height >= 16 ); // empirically found to be true
-    Q_ASSERT( wordLen >= 0 && pixWidth >= 0 && pixHeight >= 0 );
     d_wordLen = wordLen;
     d_pixWidth = pixWidth;
     d_pixHeight = pixHeight;
@@ -336,7 +335,7 @@ static inline quint16 readU16( const quint8* data, int off )
     return ( quint8(data[off]) << 8 ) + quint8(data[off+1] );
 }
 
-qint16 Bitmap::wordAt(qint16 i) const
+quint16 Bitmap::wordAt(qint16 i) const
 {
     i--; // Smalltalk array indexes start with 1
     if( i < 0 || i >= d_wordLen )
@@ -355,7 +354,7 @@ static inline void writeU16( quint8* data, int off, quint16 val )
     data[off+1] = val & 0xff;
 }
 
-void Bitmap::wordAtPut(qint16 i, qint16 v)
+void Bitmap::wordAtPut(qint16 i, quint16 v)
 {
     Q_ASSERT( i > 0 && i <= d_wordLen );
     i--;

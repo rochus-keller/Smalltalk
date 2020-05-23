@@ -584,7 +584,7 @@ ObjectMemory2::ByteString ObjectMemory2::methodBytecodes(OOP methodPointer) cons
     Q_ASSERT( s.getClass() == ObjectMemory2::classCompiledMethod );
     const quint8 literalByteCount = getLiteralByteCount( s.d_obj->d_data );
     const quint8* bytes = s.d_obj->d_data + methHdrByteLen + literalByteCount;
-    const quint16 byteLen = s.byteLen() - ( methHdrByteLen + literalByteCount );
+    const quint32 byteLen = s.byteLen() - ( methHdrByteLen + literalByteCount );
     return ByteString( bytes, byteLen );
 }
 
@@ -739,7 +739,7 @@ int ObjectMemory2::findFreeSlot()
     return -1;
 }
 
-ObjectMemory2::OOP ObjectMemory2::instantiateClass(ObjectMemory2::OOP cls, quint16 byteLen, bool isPtr)
+ObjectMemory2::OOP ObjectMemory2::instantiateClass(ObjectMemory2::OOP cls, quint32 byteLen, bool isPtr)
 {
 #ifdef _ST_COUNT_INSTS_
     s_countByClass[cls]++;
@@ -845,7 +845,7 @@ void ObjectMemory2::mark(OOP oop)
     mark( s.getClass() );
 }
 
-ObjectMemory2::OtSlot* ObjectMemory2::ObjectTable::allocate(quint16 slot, quint16 numOfBytes, OOP cls, bool isPtr)
+ObjectMemory2::OtSlot* ObjectMemory2::ObjectTable::allocate(quint16 slot, quint32 numOfBytes, OOP cls, bool isPtr)
 {
     Q_ASSERT( slot < d_slots.size() && d_slots[slot].d_obj == 0 );
     bool isOdd = false;

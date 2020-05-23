@@ -32,7 +32,7 @@ namespace St
     public:
         enum { PixPerByte = 8, PixPerWord = PixPerByte * 2 };
         Bitmap():d_buf(0),d_wordLen(0) {}
-        Bitmap( quint8* buf, qint16 wordLen, qint16 pixWidth, qint16 pixHeight );
+        Bitmap( quint8* buf, quint16 wordLen, quint16 pixWidth, quint16 pixHeight );
         inline const quint8* scanLine(int y) const
         {
             return d_buf + ( y * d_pixLineWidth / PixPerByte );
@@ -56,16 +56,16 @@ namespace St
             else
                 d_buf[bytePos] &= ~pat;
         }
-        qint16 lineWidth() const { return d_pixLineWidth; }
-        qint16 width() const { return d_pixWidth; }
-        qint16 height() const { return d_pixHeight; }
-        qint16 wordAt(qint16 i ) const;
-        void wordAtPut( qint16 i, qint16 v );
+        quint16 lineWidth() const { return d_pixLineWidth; }
+        quint16 width() const { return d_pixWidth; }
+        quint16 height() const { return d_pixHeight; }
+        quint16 wordAt(qint16 i ) const;
+        void wordAtPut( qint16 i, quint16 v );
         bool isNull() const { return d_buf == 0; }
         QImage toImage() const;
         QImage toImage(quint16 x, quint16 y, quint16 w, quint16 h) const;
     private:
-        qint16 d_pixWidth, d_pixHeight, d_pixLineWidth, d_wordLen;
+        quint16 d_pixWidth, d_pixHeight, d_pixLineWidth, d_wordLen;
         quint8* d_buf;
     };
 
