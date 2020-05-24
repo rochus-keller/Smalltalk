@@ -28,7 +28,7 @@
 #include <QCloseEvent>
 using namespace St;
 
-//#define _USE_BB_IMP_
+#define _USE_BB_IMP_
 
 static Display* s_inst = 0;
 bool Display::s_run = true;
@@ -98,7 +98,7 @@ void Display::paintEvent(QPaintEvent*)
         }
     }
 #else
-    // using QImage is much faster than drawing single points with QPainter
+    // using QImage is much faster than drawing single points with QPainter, but still rather slow as it seems
     const int lw = d_bitmap.lineWidth() / 8;
     for( int y = 0; y < d_bitmap.height(); y++ )
     {
@@ -187,36 +187,43 @@ void Display::mouseMoveEvent(QMouseEvent* event)
     }
 }
 
+enum MousButton { LeftButton = 130,
+                  MidButton = 128, // BB error, mixed up 129 and 128, VIM fixed
+                  RightButton = 129
+                };
+
 void Display::mousePressEvent(QMouseEvent* event)
 {
-    switch( event->button() )
-    {
-    case Qt::LeftButton:
-        postEvent( BiStateOn, 130 );
-        break;
-    case Qt::RightButton:
-        postEvent( BiStateOn, 129 ); // BB error, mixed up 129 and 128, VIM fixed
-        break;
-    case Qt::MidButton:
-        postEvent( BiStateOn, 128 );
-        break;
-    default:
-        break;
-    }
+    mousePressReleaseImp( true, event->button() );
 }
 
 void Display::mouseReleaseEvent(QMouseEvent* event)
 {
-    switch( event->button() )
+    mousePressReleaseImp( false, event->button() );
+}
+
+void Display::mousePressReleaseImp(bool press, int button)
+{
+    const EventType t = press ? BiStateOn : BiStateOff;
+
+    switch( button )
     {
     case Qt::LeftButton:
-        postEvent( BiStateOff, 130 );
+        if( QApplication::keyboardModifiers() == 0 )
+            postEvent( t, LeftButton );
+        else if( QApplication::keyboardModifiers() == Qt::ControlModifier )
+            postEvent( t, RightButton );
+        else if( QApplication::keyboardModifiers() == ( Qt::ControlModifier | Qt::ShiftModifier ) )
+            postEvent( t, MidButton );
         break;
     case Qt::RightButton:
-        postEvent( BiStateOff, 129 ); // BB error, mixed up 129 and 128, VIM fixed
+        if( QApplication::keyboardModifiers() == Qt::ShiftModifier )
+            postEvent( t, MidButton );
+        else
+            postEvent( t, RightButton );
         break;
     case Qt::MidButton:
-        postEvent( BiStateOff, 128 );
+        postEvent( t, MidButton );
         break;
     default:
         break;
@@ -335,10 +342,10 @@ static inline quint16 readU16( const quint8* data, int off )
     return ( quint8(data[off]) << 8 ) + quint8(data[off+1] );
 }
 
-quint16 Bitmap::wordAt(qint16 i) const
+quint16 Bitmap::wordAt(quint16 i) const
 {
     i--; // Smalltalk array indexes start with 1
-    if( i < 0 || i >= d_wordLen )
+    if( i >= d_wordLen )
     {
         // this happens five times, always in BitBlt::copyLoop
         qCritical() << "ERROR: Bitmap::wordAt width" << d_pixWidth << "height" << d_pixHeight << "wordlen" << d_wordLen << "out of bounds" << i;
@@ -354,9 +361,9 @@ static inline void writeU16( quint8* data, int off, quint16 val )
     data[off+1] = val & 0xff;
 }
 
-void Bitmap::wordAtPut(qint16 i, quint16 v)
+void Bitmap::wordAtPut(quint16 i, quint16 v)
 {
-    Q_ASSERT( i > 0 && i <= d_wordLen );
+    Q_ASSERT( i <= d_wordLen );
     i--;
     writeU16( d_buf, i * 2, v );
 }
@@ -402,6 +409,8 @@ BitBlt::BitBlt(const Input& in):
     destX( in.destX ), clipX( in.clipX ), clipWidth( in.clipWidth ), sourceX( in.sourceX ), width( in.width ),
     destY( in.destY ), clipY( in.clipY ), clipHeight( in.clipHeight ), sourceY( in.sourceY ), height( in.height )
 {
+    Q_ASSERT( sourceBits != 0 || halftoneBits != 0 );
+    // at least source or ht is present or both
 }
 
 void BitBlt::copyBits()
@@ -471,9 +480,9 @@ void BitBlt::computeMasks()
         sourceRaster = ( ( sourceBits->width() - 1 ) / 16 ) + 1;
     // halftoneBits = halftoneForm bits
     skew = ( sx - dx ) & 15;
-    qint16 startBits = 16 - ( dx & 15 );
+    const quint16 startBits = 16 - ( dx & 15 );
     mask1 = RightMasks[ startBits /* + 1 */ ]; // ST array index starts with 1
-    qint16 endBits = 15 - ( ( dx + w - 1 ) & 15 );
+    const quint16 endBits = 15 - ( ( dx + w - 1 ) & 15 );
     mask2 = ~RightMasks[ endBits /* + 1 */ ];
     skewMask = skew == 0 ? 0 : RightMasks[ 16 - skew /* + 1 */ ];
     if( w < startBits )
@@ -482,7 +491,10 @@ void BitBlt::computeMasks()
         mask2 = 0;
         nWords = 1;
     }else
-        nWords = ( w - startBits - 1 ) / 16 + 2;
+        // nWords = ( w - startBits - 1 ) / 16 + 2; // BB error, doesn't work
+        // fix found in https://github.com/dbanay/Smalltalk/blob/master/src/bitblt.cpp
+        // ERROR dbanay : nWords <-  (w - startBits + 15) // 16 + 1 for False case"
+        nWords = ( w - startBits + 15) / 16 + 1;
 }
 
 void BitBlt::checkOverlap()
@@ -520,17 +532,14 @@ void BitBlt::calculateOffsets()
         preload = preload == false;
     sourceIndex = sy * sourceRaster + ( sx / 16 );
     destIndex = dy * destRaster + ( dx / 16 );
-    sourceDelta = ( sourceRaster * vDir ) - ( nWords + ( preload ? 1 : 0 ) * hDir );
+    sourceDelta = ( sourceRaster * vDir ) - ( (nWords + ( preload ? 1 : 0 ) ) * hDir );
     destDelta = ( destRaster * vDir ) - ( nWords * hDir );
 }
 
 void BitBlt::copyLoop()
 {
 #ifdef _USE_BB_IMP_
-
-    // this code doesn't seem to properly work
-
-    qint16 prevWord, thisWord, skewWord, mergeMask,
+    quint16 prevWord, thisWord, skewWord, mergeMask,
             halftoneWord, mergeWord, word;
     for( int i = 1; i <= h; i++ )
     {
@@ -553,14 +562,19 @@ void BitBlt::copyLoop()
             if( sourceBits != 0 )
             {
                 prevWord = prevWord & skewMask;
-                thisWord = sourceBits->wordAt( sourceIndex + 1 );
+                if( word <= sourceRaster && sourceIndex >= 0 && sourceIndex < sourceBits->wordLen() )
+                    thisWord = sourceBits->wordAt( sourceIndex + 1 );
                 skewWord = prevWord | ( thisWord & ~skewMask );
                 prevWord = thisWord;
-                skewWord = ObjectMemory2::bitShift( skewWord, skew ) | ObjectMemory2::bitShift( skewWord, skew - 16 );
+                // does not work:
+                // skewWord = ObjectMemory2::bitShift( skewWord, skew ) | ObjectMemory2::bitShift( skewWord, skew - 16 );
+                skewWord = ( skewWord << skew ) | ( skewWord >> -( skew - 16 ) );
             }
-            mergeWord = merge( skewWord & halftoneWord, destBits->wordAt( destIndex + 1 ) );
-            destBits->wordAtPut( destIndex + 1, ( mergeMask & mergeWord ) |
-                                 ( ~mergeMask & destBits->wordAt( destIndex + 1 ) ) );
+            if( destIndex >= destBits->wordLen() )
+                return;
+            const quint16 destWord =  destBits->wordAt( destIndex + 1 );
+            mergeWord = merge( combinationRule, skewWord & halftoneWord, destWord );
+            destBits->wordAtPut( destIndex + 1, ( mergeMask & mergeWord ) | ( ~mergeMask & destWord ) );
             sourceIndex = sourceIndex + hDir;
             destIndex = destIndex + hDir;
             if( word == ( nWords - 1 ) )
@@ -573,8 +587,11 @@ void BitBlt::copyLoop()
     }
 #else
 
+    // qDebug() << "copyLoop destination" << dx << dy << w << h << ( sourceBits != 0 ? "source" : "" ) << ( halftoneBits != 0 ? "ht" : "" );
+
     // this code produces the same screen as the "Smalltalk 80 Virtual Image Version 2" handbook and
     // doesn't seem to be slower than the above BB code
+    // has issues though with italic fonts
     for( int y = 0; y < h; y++ )
     {
         for( int x = 0; x < w; x++ )
@@ -582,12 +599,12 @@ void BitBlt::copyLoop()
             const quint16 dest = destBits->test(dx+x,dy+y);
             if( sourceBits )
             {
-                bool bit = merge( sourceBits->test(sx+x,sy+y), dest ) != 0;
+                bool bit = merge( combinationRule, sourceBits->test(sx+x,sy+y), dest ) != 0;
                 destBits->set( dx+x, dy+y, bit );
             }else
             {
                 const bool halftone = halftoneBits != 0 ? halftoneBits->test( x & 15, y & 15 ) : AllOnes;
-                bool bit = merge( halftone, dest ) != 0;
+                bool bit = merge( combinationRule, halftone, dest ) != 0;
                 destBits->set( dx+x, dy+y, bit );
             }
         }
@@ -596,7 +613,7 @@ void BitBlt::copyLoop()
 #endif
 }
 
-qint16 BitBlt::merge(qint16 source, qint16 destination)
+quint16 BitBlt::merge(quint16 combinationRule, quint16 source, quint16 destination)
 {
     switch( combinationRule )
     {

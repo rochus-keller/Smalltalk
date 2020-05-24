@@ -807,7 +807,12 @@ void ObjectMemory2::collectGarbage()
     }
 
     Q_ASSERT( count == d_freeSlots.size() );
-    qDebug() << "INFO: collectGarbage" << count << "oop available" << int( count * 100 / d_ot.d_slots.size() ) << "%";
+    const int percent = count * 100 / d_ot.d_slots.size();
+    if( percent < 40 )
+    {
+        qDebug() << "INFO: collectGarbage" << count << "oop available" << percent << "%";
+//      exit(-1); // TEST
+    }
 }
 
 void ObjectMemory2::mark(OOP oop)

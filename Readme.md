@@ -18,8 +18,6 @@ I needed a good tool, so here we are.
 
 AND NOT TO FORGET: Smalltalk-80 turns 40 this year (2020), and Alan Kay turns 80 (May 17)!
 
-I don't seem to be the only one interested in an original Blue Book Smalltalk-80 VM. Today (May 18 2020) I found this very interesting post on Reddit: https://www.reddit.com/r/smalltalk/comments/glqbrh/in_honor_of_alans_birthday_by_the_bluebook_c/ which refers to https://github.com/dbanay/Smalltalk. The initial commit was apparently on May 12; the implementation is based on C++11 and SDL. Of course I will have a close look at it, but continue with my own implementation anyway, which eventually is supposed to run on LuaJIT if feasible.
-
 
 ### A Smalltalk-80 parser and code model written in C++
 
@@ -80,27 +78,30 @@ Here is a screenshot:
 
 This is a Blue Book implementation and currently work in progress. The focus is on functionality and compliance with the Blue Book, not on performance (it performs decently though). The interpreter reproduces the original Xerox trace2 and trace3 files included with http://www.wolczko.com/st80/image.tar.gz. The initial screen after startup corresponds to the screenshot shown on page 3 of the "Smalltalk 80 Virtual Image Version 2" manual.
 
-Here is a screenshot of the running VM immediately after startup:
+Note that you can press CTRL+left mouse button to simulate a right mouse button click, and CTRL+SHIFT+left mouse button to simulate a middle mouse button click. If you have a two button mouse, then you can also use SHIFT+right mouse button to simulate a middle mouse button click.
 
-![Screenshot](http://software.rochus-keller.info/smalltalk80_vm_0.2.png)
+Here is a screenshot of the running VM after some interactions:
 
+![Screenshot](http://software.rochus-keller.info/smalltalk80_vm_0.3.3.png)
+
+I don't seem to be the only one interested in an original Blue Book Smalltalk-80 VM. Today (May 18 2020) I found this very interesting post on Reddit: https://www.reddit.com/r/smalltalk/comments/glqbrh/in_honor_of_alans_birthday_by_the_bluebook_c/ which refers to https://github.com/dbanay/Smalltalk. The initial commit was apparently on May 12; the implementation is based on C++11 and SDL and seems to work very well (even a bit faster than this VM); I even found Blue Book fixes in dbanay's code which I didn't see anywhere else (thanks dbanay!). I will continue with my own implementation anyway, so I'm able to gradualy migrate it to a LuaJIT backend, if feasible.
 
 ### Binary versions
 
-Here is a binary version of the Class Browser and Image Viewer for Windows: http://software.rochus-keller.info/St80Tools_win32.zip.
+Here is a binary version of the Class Browser, the Image Viewer and the Virtual Machine for Windows: http://software.rochus-keller.info/St80Tools_win32.zip.
 Just unpack the ZIP somewhere on your drive and double-click St80ClassBrowser.exe or St80ImageViewer.exe; Qt libraries are included as well as the 
 original Smalltalk-80.sources and virtual image file.
 
 ### Build Steps
 
-Follow these steps if you want to build the Class Browser yourself:
+Follow these steps if you want to build the tools yourself:
 
 1. Make sure a Qt 5.x (libraries and headers) version compatible with your C++ compiler is installed on your system.
 1. Download the source code from https://github.com/rochus-keller/Smalltalk/archive/master.zip and unpack it.
-1. Goto the unpacked directory and execute `QTDIR/bin/qmake StClassBrowser.pro` (see the Qt documentation concerning QTDIR).
+1. Goto the unpacked directory and execute e.g. `QTDIR/bin/qmake StClassBrowser.pro` (see the Qt documentation concerning QTDIR).
 1. Run make; after a couple of seconds you will find the executable in the build directory.
 
-Alternatively you can open StClassBrowser.pro using QtCreator and build it there.
+Alternatively you can open the pro file using QtCreator and build it there. Note that there are different pro files in this project.
 
 ## Support
 If you need support or would like to post issues or feature requests please use the Github issue list at https://github.com/rochus-keller/Smalltalk/issues or send an email to the author.

@@ -24,7 +24,7 @@
 #include <math.h>
 using namespace St;
 
-//#define ST_DO_TRACING
+// #define ST_DO_TRACING
 #define ST_DO_TRACE2
 #define ST_TRACE_SYSTEM_ERRORS
 
@@ -256,7 +256,6 @@ bool Interpreter::lookupMethodInDictionary(Interpreter::OOP dictionary)
     OOP messageSelector = memory->getRegister(MessageSelector);
 
     // Just a trivial linear scan; not the more fancy hash lookup described in the Blue Book
-    // TODO: currently the most expensive Interpreter method, switch to BB implementation
     const int SelectorStart = 2;
     const int MethodArrayIndex = 1;
     int length = memory->fetchWordLenghtOf(dictionary);
@@ -525,12 +524,13 @@ static const quint16 ValueIndex = 1;
 
 bool Interpreter::pushLiteralVariableBytecode()
 {
+    // "Push Literal Variable #%1").arg( b & 0x1f ), 1 );
     const quint16 fieldIndex = extractBits( 11, 15, currentBytecode );
     const OOP association = literal( fieldIndex );
-    ST_TRACE_BYTECODE("literal" << fieldIndex << "value" << memory->prettyValue(association).constData() <<
+    const OOP value = memory->fetchPointerOfObject( ValueIndex, association );
+    ST_TRACE_BYTECODE("literal" << fieldIndex << "value" << memory->prettyValue(value).constData() <<
                       "of method" << QByteArray::number( memory->getRegister(Method), 16 ).constData());
-    // "Push Literal Variable #%1").arg( b & 0x1f ), 1 );
-    push( memory->fetchPointerOfObject( ValueIndex, association ) );
+    push( value );
     return true;
 }
 
@@ -1275,7 +1275,7 @@ void Interpreter::primitiveBitShift()
     ST_TRACE_PRIMITIVE("");
     const qint16 integerArgument = popInteger();
     const qint16 integerReceiver = popInteger();
-    successUpdate( integerArgument != 0 );
+
     qint16 integerResult = 0;
     if( success )
     {
@@ -2758,12 +2758,13 @@ void Interpreter::primitiveMousePoint()
 
 void Interpreter::primitiveSignalAtOopsLeftWordsLeft()
 {
-    static bool signaled = false;
-    if( !signaled )
-    {
-        signaled = true;
-        qWarning() << "WARNING: primitiveSignalAtOopsLeftWordsLeft not yet implemnted";
-    }
+    OOP number1 = popStack();
+    OOP number2 = popStack();
+    OOP semaphore =  popStack();
+
+    // BB error: not documented, neither in VIM
+    qDebug() << "WARNING: primitiveSignalAtOopsLeftWordsLeft not implemented" << memory->prettyValue(number1).constData()
+             << memory->prettyValue(number2).constData() << memory->prettyValue(semaphore).constData();
 }
 
 void Interpreter::primitiveCursorLocPut()

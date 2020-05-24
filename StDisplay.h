@@ -59,8 +59,9 @@ namespace St
         quint16 lineWidth() const { return d_pixLineWidth; }
         quint16 width() const { return d_pixWidth; }
         quint16 height() const { return d_pixHeight; }
-        quint16 wordAt(qint16 i ) const;
-        void wordAtPut( qint16 i, quint16 v );
+        quint16 wordLen() const { return d_wordLen; }
+        quint16 wordAt(quint16 i ) const;
+        void wordAtPut( quint16 i, quint16 v );
         bool isNull() const { return d_buf == 0; }
         QImage toImage() const;
         QImage toImage(quint16 x, quint16 y, quint16 w, quint16 h) const;
@@ -103,6 +104,7 @@ namespace St
         void mouseMoveEvent(QMouseEvent * event);
         void mousePressEvent(QMouseEvent * event);
         void mouseReleaseEvent(QMouseEvent *event);
+        void mousePressReleaseImp(bool press, int button );
         void keyPressEvent(QKeyEvent* event);
         void keyReleaseEvent(QKeyEvent* event);
         QString renderTitle() const;
@@ -144,12 +146,13 @@ namespace St
         void checkOverlap();
         void calculateOffsets();
         void copyLoop();
-        inline qint16 merge(qint16 source, qint16 destination );
+        void copyLoop2();
+        static inline quint16 merge(quint16 combinationRule, quint16 source, quint16 destination );
     private:
         const Bitmap* sourceBits;
         const Bitmap* halftoneBits;
-        const qint16 destX, clipX, clipWidth, sourceX, width; // pixel
-        const qint16 destY, clipY, clipHeight, sourceY, height; // pixel
+        qint16 destX, clipX, clipWidth, sourceX, width; // pixel
+        qint16 destY, clipY, clipHeight, sourceY, height; // pixel
         const qint16 combinationRule;
         Bitmap* destBits;
         qint16 sourceRaster;
