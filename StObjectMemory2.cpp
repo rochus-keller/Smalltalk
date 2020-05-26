@@ -674,9 +674,9 @@ ObjectMemory2::OOP ObjectMemory2::integerObjectOf(qint16 value)
         res = ( value << 1 ) | 1;
     else
     {
-        value = ::abs(value);
-        res = ~value + 1;
-        res = ( res << 1 ) | 1; // TODO: to TEST
+        res = ~::abs(value) + 1;
+        res = ( res << 1 ) | 1;
+        // Q_ASSERT( integerValueOf(res) == value );
     }
     return res;
 }

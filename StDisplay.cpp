@@ -26,6 +26,7 @@
 #include <QMessageBox>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QShortcut>
 using namespace St;
 
 #define _USE_BB_IMP_
@@ -34,7 +35,8 @@ static Display* s_inst = 0;
 bool Display::s_run = true;
 static const int s_msPerFrame = 30; // 20ms according to BB
 
-Display::Display(QWidget *parent) : QWidget(parent),d_curX(-1),d_curY(-1)
+Display::Display(QWidget *parent) : QWidget(parent),d_curX(-1),d_curY(-1),d_capsLockDown(false),
+    d_shiftDown(false),d_recOn(false)
 {
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
@@ -44,6 +46,7 @@ Display::Display(QWidget *parent) : QWidget(parent),d_curX(-1),d_curY(-1)
     d_lastEvent = 0;
     d_timer.start();
     startTimer(s_msPerFrame);
+    new QShortcut(tr("ALT+R"), this, SLOT(onRecord()) );
 }
 
 Display*Display::inst()
@@ -77,6 +80,32 @@ void Display::setCursorPos(qint16 x, qint16 y)
     d_curX = x;
     d_curY = y;
     update();
+}
+
+void Display::drawRecord(int x, int y, int w, int h)
+{
+    //qDebug() << "drawRec" << d_recOn;
+    if( !d_recOn )
+        return;
+    QPainter p(&d_record);
+    p.setPen(Qt::red);
+    p.drawRect(x,y,w,h);
+}
+
+void Display::onRecord()
+{
+    if( !d_recOn )
+    {
+        qDebug() << "record on";
+        d_recOn = true;
+        d_record = d_screen.convertToFormat(QImage::Format_RGB32);
+    }else
+    {
+        qDebug() << "record off";
+        d_record.save("record.png");
+        d_record = QImage();
+        d_recOn = false;
+    }
 }
 
 void Display::paintEvent(QPaintEvent*)
@@ -232,27 +261,33 @@ void Display::mousePressReleaseImp(bool press, int button)
 
 void Display::keyPressEvent(QKeyEvent* event)
 {
-#if 0
-    qDebug() << QByteArray::number(event->key(),16).constData() << event->text();
+    //qDebug() << QByteArray::number(event->key(),16).constData() << event->text();
+    char ch = 0;
     if( !event->text().isEmpty() )
-    {
-        const int ch = event->text()[0].unicode();
-        if( ch <= 128)
-        {
-            postEvent( BiStateOn, ch, true );
-            postEvent( BiStateOff, ch, false );
-        } // else ignore
-    }else
-#endif
-        // TODO: fix keyboard mappings
-    if( !keyEvent( event->key(), true ) )
+        ch = event->text()[0].toLatin1();
+    if( !keyEvent( event->key(), ch, true ) )
         QWidget::keyPressEvent(event);
 }
 
 void Display::keyReleaseEvent(QKeyEvent* event)
 {
-    if( !keyEvent( event->key(), false ) )
+    char ch = 0;
+    if( !event->text().isEmpty() )
+        ch = event->text()[0].toLatin1();
+    if( !keyEvent( event->key(), ch, false ) )
         QWidget::keyReleaseEvent(event);
+}
+
+void Display::inputMethodEvent(QInputMethodEvent* event)
+{
+    QString text = event->commitString();
+
+    if( !text.isEmpty() && text.at(0).isPrint() )
+    {
+        const char ch = text.at(0).toLatin1();
+        keyEvent( 0, ch, true );
+        keyEvent( 0, ch, false );
+    }
 }
 
 QString Display::renderTitle() const
@@ -294,8 +329,110 @@ bool Display::postEvent(Display::EventType t, quint16 param, bool withTime )
     return true;
 }
 
-bool Display::keyEvent(int keyCode, bool down)
+/*
+    // Alto keyboard layout
+    // see https://www.extremetech.com/wp-content/uploads/2011/10/Alto_Mouse_c.jpg
+    1 !
+    2 @
+    3 #
+    4 $
+    5 %
+    6 ~
+    7 &
+    8 *
+    9 (
+    0 )
+    - _
+    = +
+    \ |
+    [ {
+    ] }
+    ← ↑
+    ; :
+    ' "
+    , <
+    . >
+    / ?
+    a A
+    ...
+    z Z
+  */
+
+static inline char toAltoUpper( char ch )
 {
+    switch( ch )
+    {
+    case '+':
+        return '='; // means: the key is labeled with '=' for normal press and '+' for shift press
+                    // if we want a '+' to appear we have to send shift-down '=' shift-up to the VM
+    case '_':
+        return '-';
+    case '|':
+        return '\\';
+    case '{':
+        return '[';
+    case '}':
+        return ']';
+    case ':':
+        return ';';
+    case '"':
+        return '\'';
+    case '<':
+        return ',';
+    case '>':
+        return '.';
+    case '?':
+        return '/';
+    case '!':
+        return '1';
+    case '@':
+        return '2';
+    case '#':
+        return '3';
+    case '$':
+        return '4';
+    case '%':
+        return '5';
+    case '~':
+        return '6';
+    case '&':
+        return '7';
+    case '*':
+        return '8';
+    case '(':
+        return '9';
+    case ')':
+        return '0';
+    }
+    if( ch >= 'A' && ch <= 'Z' )
+        return ::tolower(ch);
+    return 0;
+}
+
+static inline bool isAltoLower(char ch )
+{
+    if( ( ch >= 'a' && ch <= 'z' ) || ( ch >= '0' && ch <= '9' ) )
+        return true;
+    switch( ch )
+    {
+    case '-':
+    case '=':
+    case '\\':
+    case '[':
+    case ']':
+    case ';':
+    case '\'':
+    case ',':
+    case '.':
+    case '/':
+        return true;
+    }
+    return false;
+}
+
+bool Display::keyEvent(int keyCode, char ch, bool down)
+{
+    //qDebug() << QByteArray::number(keyCode,16).constData() << ch;
     switch( keyCode )
     {
     case Qt::Key_Backspace:
@@ -313,15 +450,49 @@ bool Display::keyEvent(int keyCode, bool down)
         return postEvent( down ? BiStateOn : BiStateOff, 127 );
         // NOTE: right shift	137
     case Qt::Key_Shift:
+        d_shiftDown = down;
         return postEvent( down ? BiStateOn : BiStateOff, 136 );
     case Qt::Key_Control:
         return postEvent( down ? BiStateOn : BiStateOff, 138 );
     case Qt::Key_CapsLock:
+        d_capsLockDown = down;
         return postEvent( down ? BiStateOn : BiStateOff, 139 );
+    case Qt::Key_Left:
+        // ← ASCII 95 0x5f _
+        return postEvent( down ? BiStateOn : BiStateOff, 95 );
+    case Qt::Key_Up:
+        // ↑ ASCII 94 0x5e ^
+        return postEvent( down ? BiStateOn : BiStateOff, 94 );
     }
-    if( keyCode >= '!' && keyCode <= '~' )
-        return postEvent( down ? BiStateOn : BiStateOff, ::tolower(keyCode) );
+    if( ch >= '!' && ch <= '~' )
+    {
+        if( isAltoLower( ch ) )
+        {
+            if( down )
+                sendShift( true, false );
+            const bool res = postEvent( down ? BiStateOn : BiStateOff, ch );
+            if( !down )
+                sendShift( false, false );
+            return res;
+        }else if( ch = toAltoUpper( ch ) )
+        {
+            if( down )
+                sendShift( true, true );
+            const bool res = postEvent( down ? BiStateOn : BiStateOff, ch );
+            if( !down )
+                sendShift( false, true );
+            return res;
+        }
+    }
     return false;
+}
+
+void Display::sendShift(bool keyPress, bool shiftRequired)
+{
+    if( shiftRequired && !d_shiftDown ) // need to press shift
+        postEvent( keyPress ? BiStateOn : BiStateOff, 136 );
+    else if( !shiftRequired && d_shiftDown ) // need to release shift
+        postEvent( !keyPress ? BiStateOn : BiStateOff, 136 );
 }
 
 Bitmap::Bitmap(quint8* buf, quint16 wordLen, quint16 pixWidth, quint16 pixHeight)
@@ -564,6 +735,8 @@ void BitBlt::copyLoop()
                 prevWord = prevWord & skewMask;
                 if( word <= sourceRaster && sourceIndex >= 0 && sourceIndex < sourceBits->wordLen() )
                     thisWord = sourceBits->wordAt( sourceIndex + 1 );
+                else
+                    thisWord = 0;
                 skewWord = prevWord | ( thisWord & ~skewMask );
                 prevWord = thisWord;
                 // does not work:

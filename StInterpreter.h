@@ -21,6 +21,7 @@
 */
 
 #include <QObject>
+#include <QTimer>
 #include <QVector>
 #include <Smalltalk/StObjectMemory2.h>
 
@@ -101,6 +102,7 @@ namespace St
         void cycle();
     protected slots:
         void onEvent();
+        void onTimeout();
 
     protected:
         qint16 instructionPointerOfContext( OOP contextPointer );
@@ -304,6 +306,9 @@ namespace St
         void primitiveMousePoint();
         void primitiveSignalAtOopsLeftWordsLeft();
         void primitiveCursorLocPut();
+        void primitiveTimeWordsInto();
+        void primitiveTickWordsInto();
+        void primitiveSignalAtClick();
         static inline quint16 extractBits( quint8 from, quint8 to, quint16 of )
         {
             Q_ASSERT( from <= to && to <= 15 );
@@ -327,6 +332,8 @@ namespace St
         QList<OOP> semaphoreList;
         quint32 cycleNr, level;
         QByteArray prevMsg;
+        QTimer d_timer;
+        OOP toSignal;
         quint8 currentBytecode;
         bool success, newProcessWaiting;
     };

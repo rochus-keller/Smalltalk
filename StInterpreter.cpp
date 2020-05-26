@@ -22,6 +22,7 @@
 #include <QtDebug>
 #include <QApplication>
 #include <math.h>
+#include <QDateTime>
 using namespace St;
 
 // #define ST_DO_TRACING
@@ -58,9 +59,10 @@ using namespace St;
 #endif
 
 Interpreter::Interpreter(QObject* p):QObject(p),memory(0),stackPointer(0),instructionPointer(0),
-    newProcessWaiting(false),cycleNr(0), level(0)
+    newProcessWaiting(false),cycleNr(0), level(0), toSignal(0)
 {
-
+    d_timer.setSingleShot(true);
+    connect( &d_timer, SIGNAL(timeout()), this, SLOT(onTimeout()) );
 }
 
 static ObjectMemory2::OOP findDisplay(ObjectMemory2* memory)
@@ -291,7 +293,7 @@ bool Interpreter::lookupMethodInClass(Interpreter::OOP cls)
     if( memory->getRegister(MessageSelector) == ObjectMemory2::symbolDoesNotUnderstand )
     {
         qCritical() << "ERROR: Recursive not understood error encountered";
-        // TODO: self error:
+        // BB self error:
         return false;
     }
     createActualMessage();
@@ -360,6 +362,13 @@ void Interpreter::onEvent()
         asynchronousSignal(sema);
     }else
         Display::inst()->nextEvent();
+}
+
+void Interpreter::onTimeout()
+{
+    // qWarning() << "onTimeout";
+    if( toSignal )
+        asynchronousSignal(toSignal);
 }
 
 void Interpreter::checkProcessSwitch()
@@ -647,7 +656,7 @@ bool Interpreter::extendedStoreBytecode(bool subcall)
         break;
     case 2:
         qCritical() << "ERROR: illegal store";
-        // TODO: self error:
+        // BB: self error:
         break;
     case 3:
         memory->storePointerOfObject(ValueIndex, literal(variableIndex), stackTop() );
@@ -1237,7 +1246,7 @@ void Interpreter::primitiveMod()
     qint16 integerResult = 0;
     if( success )
     {
-        integerResult = MOD(integerReceiver,integerArgument); // TODO validate
+        integerResult = MOD(integerReceiver,integerArgument);
         successUpdate( memory->isIntegerValue(integerResult) );
     }
     if( success )
@@ -1305,7 +1314,7 @@ void Interpreter::primitiveDiv()
     qint16 integerResult = 0;
     if( success )
     {
-        integerResult = DIV( integerReceiver, integerArgument ); // TODO validate
+        integerResult = DIV( integerReceiver, integerArgument );
         successUpdate( memory->isIntegerValue(integerResult) );
     }
     if( success )
@@ -1566,7 +1575,6 @@ void Interpreter::dispatchControlPrimitives()
 
 void Interpreter::dispatchInputOutputPrimitives()
 {
-    // TODO BB p. 648ff
     switch( primitiveIndex )
     {
     case 90:
@@ -1593,20 +1601,16 @@ void Interpreter::dispatchInputOutputPrimitives()
     case 97:
         //primitiveSnapshot();
         qWarning() << "WARNING: primitiveSnapshot not yet implemented";
+        //primitiveFail();
         break;
     case 98:
-        //primitiveTimeWordsInto();
-        qWarning() << "WARNING: primitiveTimeWordsInto not yet implemented";
+        primitiveTimeWordsInto();
         break;
     case 99:
-        //primitiveTickWordsInto();
-        qWarning() << "WARNING: primitiveTickWordsInto not yet implemented";
-        primitiveFail();
+        primitiveTickWordsInto();
         break;
     case 100:
-        //primitiveSignalAtClick();
-        qWarning() << "WARNING: primitiveSignalAtClick not yet implemented";
-        primitiveFail();
+        primitiveSignalAtClick();
         break;
     case 101:
         primitiveBeCursor();
@@ -1615,30 +1619,6 @@ void Interpreter::dispatchInputOutputPrimitives()
         primitiveBeDisplay();
         break;
     case 103:
-#ifdef ST_TRACE_SYSTEM_ERRORS_
-        if( stackTop() == ObjectMemory2::objectTrue )
-        {
-            /* Stack: argumentCount = 6
-             * 0 6 bool display
-             * 1 5 a Array stops
-             * 2 4 a ShortInteger rightX
-             * 3 3 a String sourceString
-             * 4 2 a ShortInteger stopIndex
-             * 5 1 a ShortInteger startIndex
-             */
-            QByteArray str = memory->fetchByteArray( stackValue(3), true );
-            const int pos = str.indexOf( "**System Error" );
-            if( pos != -1 )
-            {
-                QByteArray substr = str.mid(pos);
-                if( substr != prevMsg )
-                {
-                    qCritical() << substr.constData();
-                    prevMsg = substr;
-                }
-            }
-        }
-#endif
         //primitiveScanCharacters();
         primitiveFail(); // optional primitive not implemented
         break;
@@ -1693,7 +1673,7 @@ void Interpreter::dispatchPrivatePrimitives()
 {
     ST_TRACE_PRIMITIVE("");
     qWarning() << "WARNING: dispatchPrivatePrimitives not yet implemented";
-    // TODO
+    primitiveFail();
 }
 
 void Interpreter::dispatchIntegerPrimitives()
@@ -2472,6 +2452,8 @@ void Interpreter::asynchronousSignal(Interpreter::OOP aSemaphore)
 
 bool Interpreter::isEmptyList(Interpreter::OOP aLinkedList)
 {
+    if( aLinkedList == ObjectMemory2::objectNil )
+        return true;
     return memory->fetchPointerOfObject(FirstLinkIndex,aLinkedList) == ObjectMemory2::objectNil;
 }
 
@@ -2584,6 +2566,7 @@ void Interpreter::suspendActive()
 
 void Interpreter::primitiveQuit()
 {
+    ST_TRACE_PRIMITIVE("");
     Display::s_run = false;
     // Display::inst()->close();
 }
@@ -2619,6 +2602,7 @@ QByteArray Interpreter::prettyArgs_()
 
 void Interpreter::primitiveBeDisplay()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP displayScreen = popStack();
 
     // OOP cls = memory->fetchClassOf(displayScreen);
@@ -2629,6 +2613,7 @@ void Interpreter::primitiveBeDisplay()
 
 void Interpreter::primitiveCopyBits()
 {
+    ST_TRACE_PRIMITIVE("");
     // primitive 96
 
     /* Stack:
@@ -2663,6 +2648,10 @@ void Interpreter::primitiveCopyBits()
     in.clipWidth = memory->integerValueOf( memory->fetchPointerOfObject(12,bitblt), true );
     in.clipHeight = memory->integerValueOf( memory->fetchPointerOfObject(13,bitblt), true );
 
+//    if( Display::inst()->getBitmap().isSameBuffer( destBits ) )
+//        qDebug() << "updating screen" << in.destX << in.destY << in.width << in.height
+//                 << "clipped at" << in.clipX << in.clipY << in.clipWidth << in.clipHeight;
+
 //    if( !halftoneBits.isNull() )
 //        Q_ASSERT( halftoneBits.width() == 16 && halftoneBits.height() == 16 ); // this always holds
 
@@ -2677,11 +2666,14 @@ void Interpreter::primitiveCopyBits()
 //        halftoneBits.toImage().save("halftone.png");
 //    }
 
+    Display::inst()->drawRecord( in.destX, in.destY, in.width, in.height );
+
     // checked that if we pop BitBlt then the interpreter behaves stranegly and eventually crashes.
 }
 
 void Interpreter::primitiveStringReplace()
 {
+    ST_TRACE_PRIMITIVE("");
     primitiveFail(); // optional, apparently has as smalltalk implementation
     // pop(4);
 }
@@ -2702,6 +2694,7 @@ void Interpreter::dumpStack_(const char* title)
 
 void Interpreter::primitiveBeCursor()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP cursor = stackValue(0);
 
     Display::inst()->setCursorBitmap( fetchBitmap(memory, cursor ) );
@@ -2711,23 +2704,27 @@ void Interpreter::primitiveBeCursor()
 
 void Interpreter::primitiveCursorLink()
 {
+    ST_TRACE_PRIMITIVE("");
     qWarning() << "WARNING: primitiveCursorLink not supported" << memory->prettyValue(stackTop());
     popStack(); // bool
 }
 
 void Interpreter::primitiveInputSemaphore()
 {
+    ST_TRACE_PRIMITIVE("");
     memory->setRegister( InputSemaphore, popStack() );
 }
 
 void Interpreter::primitiveInputWord()
 {
+    ST_TRACE_PRIMITIVE("");
     pop(1);
     push( positive16BitIntegerFor( Display::inst()->nextEvent() ) );
 }
 
 void Interpreter::primitiveSamleInterval()
 {
+    ST_TRACE_PRIMITIVE("");
     qWarning() << "WARNING: primitiveSamleInterval not yet implemented";
     primitiveFail();
 }
@@ -2743,6 +2740,7 @@ static qint16 cropPoint( int pos )
 
 void Interpreter::primitiveMousePoint()
 {
+    ST_TRACE_PRIMITIVE("");
 #if 0
     QPoint pos = Display::inst()->getMousePos();
 
@@ -2758,6 +2756,7 @@ void Interpreter::primitiveMousePoint()
 
 void Interpreter::primitiveSignalAtOopsLeftWordsLeft()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP number1 = popStack();
     OOP number2 = popStack();
     OOP semaphore =  popStack();
@@ -2769,9 +2768,52 @@ void Interpreter::primitiveSignalAtOopsLeftWordsLeft()
 
 void Interpreter::primitiveCursorLocPut()
 {
+    ST_TRACE_PRIMITIVE("");
     OOP point = popStack();
     Display::inst()->setCursorPos( memory->integerValueOf( memory->fetchPointerOfObject( XIndex, point ) ),
                                    memory->integerValueOf( memory->fetchPointerOfObject( YIndex, point ) ) );
+}
+
+void Interpreter::primitiveTimeWordsInto()
+{
+    ST_TRACE_PRIMITIVE("");
+    OOP oop = popStack();
+    const quint32 diff = QDateTime( QDate( 1901, 1, 1 ), QTime( 0, 0, 0 ) ).secsTo(QDateTime::currentDateTime());
+    // qDebug() << "primitiveTimeWordsInto" << diff;
+    memory->storeByteOfObject(3,oop, ( diff >> 24 ) & 0xff );
+    memory->storeByteOfObject(2,oop, ( diff >> 16 ) & 0xff );
+    memory->storeByteOfObject(1,oop, ( diff >> 8 ) & 0xff );
+    memory->storeByteOfObject(0,oop, diff & 0xff );
+}
+
+void Interpreter::primitiveTickWordsInto()
+{
+    ST_TRACE_PRIMITIVE("");
+    OOP oop = popStack();
+    const quint32 ticks = Display::inst()->getTicks();
+    // qDebug() << "primitiveTickWordsInto" << ticks;
+    // NOTE: unexpected byte order, but empirically validated with primitiveSignalAtClick that it's the right one
+    memory->storeByteOfObject(3,oop, ( ticks >> 24 ) & 0xff );
+    memory->storeByteOfObject(2,oop, ( ticks >> 16 ) & 0xff );
+    memory->storeByteOfObject(1,oop, ( ticks >> 8 ) & 0xff );
+    memory->storeByteOfObject(0,oop, ticks & 0xff );
+}
+
+void Interpreter::primitiveSignalAtClick()
+{
+    ST_TRACE_PRIMITIVE("");
+    OOP oop = popStack();
+    toSignal = popStack();
+    quint32 time =  ( memory->fetchByteOfObject(3,oop) << 24 ) |
+    ( memory->fetchByteOfObject(2,oop) << 16 ) |
+    ( memory->fetchByteOfObject(1,oop) << 8 ) |
+    memory->fetchByteOfObject(0,oop);
+    quint32 ticks = Display::inst()->getTicks();
+    const int diff = time - ticks;
+    if( diff > 0 )
+        d_timer.start(diff);
+    else
+        asynchronousSignal(toSignal);
 }
 
 void Interpreter::primitiveQuo()
@@ -2940,7 +2982,8 @@ void Interpreter::primitiveTruncated()
 
 void Interpreter::primitiveFractionalPart()
 {
-    float floatReceiver = popFloat();
+    ST_TRACE_PRIMITIVE("");
+    const float floatReceiver = popFloat();
     if( success )
         pushFloat( floatReceiver - (int) floatReceiver );
     else
@@ -2950,15 +2993,13 @@ void Interpreter::primitiveFractionalPart()
 void Interpreter::primitiveExponent()
 {
     ST_TRACE_PRIMITIVE("");
-    qWarning() << "WARNING: primitiveExponent not yet implemented";
-    primitiveFail(); // TODO
+    primitiveFail(); // optional
 }
 
 void Interpreter::primitiveTimesTwoPower()
 {
     ST_TRACE_PRIMITIVE("");
-    qWarning() << "WARNING: primitiveTimesTwoPower not yet implemented";
-    primitiveFail(); // TODO
+    primitiveFail(); // optional
 }
 
 

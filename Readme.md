@@ -68,6 +68,7 @@ clicking on a list item or link a list or detail view opens with the given objec
 dedicated list with all classes and metaclasses found in the image, as well as a cross-reference list
 from where a given oop is referenced. Detail views of methods also show bytecode with descriptions.
 There is also a browsing history; you can go back or forward using the ALT+Left and ALT+Right keys.
+Use CTRL+G to navigate to a given OOP, and CTRL+F to find text in the detail view (F3 to find again).
 
 
 Here is a screenshot:
@@ -79,6 +80,8 @@ Here is a screenshot:
 This is a Blue Book implementation and currently work in progress. The focus is on functionality and compliance with the Blue Book, not on performance (it performs decently though). The interpreter reproduces the original Xerox trace2 and trace3 files included with http://www.wolczko.com/st80/image.tar.gz. The initial screen after startup corresponds to the screenshot shown on page 3 of the "Smalltalk 80 Virtual Image Version 2" manual.
 
 Note that you can press CTRL+left mouse button to simulate a right mouse button click, and CTRL+SHIFT+left mouse button to simulate a middle mouse button click. If you have a two button mouse, then you can also use SHIFT+right mouse button to simulate a middle mouse button click.
+
+All keys on the Alto keyboard (see e.g. https://www.extremetech.com/wp-content/uploads/2011/10/Alto_Mouse_c.jpg) besides LF are supported; just type the key combination for the expected symbol on your local keyboard. Use the left and up arrow keys to enter a left and up arrow character.
 
 Here is a screenshot of the running VM after some interactions:
 

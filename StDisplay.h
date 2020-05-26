@@ -63,6 +63,7 @@ namespace St
         quint16 wordAt(quint16 i ) const;
         void wordAtPut( quint16 i, quint16 v );
         bool isNull() const { return d_buf == 0; }
+        bool isSameBuffer( const Bitmap& rhs ) const { return rhs.d_buf == d_buf; }
         QImage toImage() const;
         QImage toImage(quint16 x, quint16 y, quint16 w, quint16 h) const;
     private:
@@ -89,13 +90,18 @@ namespace St
         static bool s_run;
 
         void setBitmap( const Bitmap& );
+        const Bitmap& getBitmap() const { return d_bitmap; }
         void setCursorBitmap( const Bitmap& );
         void setCursorPos( qint16 x, qint16 y );
         const QPoint& getMousePos() const { return d_mousePos; }
         quint16 nextEvent() { return d_events.dequeue(); }
-
+        quint32 getTicks() const { return d_timer.elapsed(); }
+        void drawRecord( int x, int y, int w, int h );
     signals:
         void sigEventQueue();
+
+    protected slots:
+        void onRecord();
 
     protected:
         void paintEvent(QPaintEvent *);
@@ -107,9 +113,11 @@ namespace St
         void mousePressReleaseImp(bool press, int button );
         void keyPressEvent(QKeyEvent* event);
         void keyReleaseEvent(QKeyEvent* event);
+        void inputMethodEvent(QInputMethodEvent *);
         QString renderTitle() const;
         bool postEvent(EventType, quint16 param = 0 , bool withTime = true);
-        bool keyEvent( int keyCode, bool down );
+        bool keyEvent( int keyCode, char ch, bool down );
+        void sendShift(bool keyPress, bool shiftRequired);
     private:
         Bitmap d_bitmap;
         QImage d_screen;
@@ -119,6 +127,8 @@ namespace St
         QQueue<quint16> d_events;
         quint32 d_lastEvent; // number of milliseconds since last event was posted to queue
         QElapsedTimer d_timer;
+        QImage d_record;
+        bool d_shiftDown, d_capsLockDown, d_recOn;
     };
 
     class BitBlt
@@ -146,13 +156,12 @@ namespace St
         void checkOverlap();
         void calculateOffsets();
         void copyLoop();
-        void copyLoop2();
         static inline quint16 merge(quint16 combinationRule, quint16 source, quint16 destination );
     private:
         const Bitmap* sourceBits;
         const Bitmap* halftoneBits;
-        qint16 destX, clipX, clipWidth, sourceX, width; // pixel
-        qint16 destY, clipY, clipHeight, sourceY, height; // pixel
+        const qint16 destX, clipX, clipWidth, sourceX, width; // pixel
+        const qint16 destY, clipY, clipHeight, sourceY, height; // pixel
         const qint16 combinationRule;
         Bitmap* destBits;
         qint16 sourceRaster;
