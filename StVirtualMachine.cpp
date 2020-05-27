@@ -59,7 +59,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Virtual Machine");
-    a.setApplicationVersion("0.4");
+    a.setApplicationVersion("0.4.1");
     a.setStyle("Fusion");
 
     VirtualMachine w;

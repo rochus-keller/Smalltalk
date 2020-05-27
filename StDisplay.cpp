@@ -34,6 +34,7 @@ using namespace St;
 static Display* s_inst = 0;
 bool Display::s_run = true;
 static const int s_msPerFrame = 30; // 20ms according to BB
+enum { whitePixel = 1, blackPixel = 0 };
 
 Display::Display(QWidget *parent) : QWidget(parent),d_curX(-1),d_curY(-1),d_capsLockDown(false),
     d_shiftDown(false),d_recOn(false)
@@ -45,7 +46,7 @@ Display::Display(QWidget *parent) : QWidget(parent),d_curX(-1),d_curY(-1),d_caps
     show();
     d_lastEvent = 0;
     d_timer.start();
-    startTimer(s_msPerFrame);
+    // startTimer(s_msPerFrame);
     new QShortcut(tr("ALT+R"), this, SLOT(onRecord()) );
 }
 
@@ -59,7 +60,7 @@ Display*Display::inst()
 void Display::setBitmap(const Bitmap& buf)
 {
     d_bitmap = buf;
-    d_screen = QImage( d_bitmap.width(), d_bitmap.height(), QImage::Format_Mono );
+    d_screen = d_bitmap.toImage();
     setFixedSize( buf.width(), buf.height() );
     update();
 }
@@ -88,8 +89,45 @@ void Display::drawRecord(int x, int y, int w, int h)
     if( !d_recOn )
         return;
     QPainter p(&d_record);
-    p.setPen(Qt::red);
+    if( w < 0 || h < 0 )
+        p.setPen(Qt::red);
+    else
+        p.setPen(Qt::green);
     p.drawRect(x,y,w,h);
+}
+
+void Display::updateArea(const QRect& r )
+{
+    const int w = r.width();
+    const int h = r.height();
+    if( w > d_bitmap.width() / 2 && h > d_bitmap.height() / 2 )
+    {
+        // full area
+
+        // using QImage is much faster than drawing single points with QPainter, but still rather slow as it seems
+        const int lw = d_bitmap.lineWidth() / 8;
+        for( int y = 0; y < d_bitmap.height(); y++ )
+        {
+            uchar* dest = d_screen.scanLine(y);
+            const quint8* src = d_bitmap.scanLine(y);
+            for( int x = 0; x < lw; x++ )
+                dest[x] = ~src[x];
+            //memcpy( dest, src, lw );
+        }
+    }else
+    {
+        // part of the area
+        const int y = r.y();
+        const int x = r.x();
+        for( int _y = 0; _y < h; _y++ )
+        {
+            for( int _x = 0; _x < w; _x++ )
+                d_screen.setPixel(_x+x,_y+y, d_bitmap.test(_x+x,_y+y) ? blackPixel : whitePixel );
+        }
+    }
+
+
+    update( r );
 }
 
 void Display::onRecord()
@@ -108,35 +146,11 @@ void Display::onRecord()
     }
 }
 
-void Display::paintEvent(QPaintEvent*)
+void Display::paintEvent(QPaintEvent* event)
 {
     if( d_bitmap.isNull() )
         return;
     QPainter p(this);
-#if 0
-    p.fillRect(0,0,d_bitmap.width(),d_bitmap.height(), Qt::white );
-    p.setPen(Qt::black);
-    enum { white = 1, black = 0 };
-    img.fill(white);
-    for( int y = 0; y < d_bitmap.height(); y++ )
-    {
-        for( int x = 0; x < d_bitmap.width(); x++ )
-        {
-            if( d_bitmap.testBit(x,y) )
-                img.setPixel(x,y,black); // p.drawPoint(x, y);
-        }
-    }
-#else
-    // using QImage is much faster than drawing single points with QPainter, but still rather slow as it seems
-    const int lw = d_bitmap.lineWidth() / 8;
-    for( int y = 0; y < d_bitmap.height(); y++ )
-    {
-        uchar* dest = d_screen.scanLine(y);
-        const quint8* src = d_bitmap.scanLine(y);
-        for( int x = 0; x < lw; x++ )
-            dest[x] = ~src[x];
-        //memcpy( dest, src, lw );
-    }
 
 #if 0 // draw cursor ourselves
     //d_img.invertPixels();
@@ -155,18 +169,18 @@ void Display::paintEvent(QPaintEvent*)
         const int my = d_mousePos.y();
         for( int y = 0; y < d_cursor.height(); y++ )
         {
-            // pixelIndex black=0, white=1
             for( int x = 0; x < d_cursor.width(); x++ )
             {
                 if( d_cursor.pixelIndex(x,y) == 0 )
-                    d_screen.setPixel( mx + x, my + y, d_screen.pixelIndex( mx + x, my + y ) ? 0 : 1 );
+                    d_screen.setPixel( mx + x, my + y, d_screen.pixelIndex( mx + x, my + y ) ? blackPixel : whitePixel );
             }
         }
 #endif
     }
 #endif
-#endif
-    p.drawImage(0,0,d_screen);
+
+    const QRect r = event->rect();
+    p.drawImage( r,d_screen, r);
 }
 
 void Display::timerEvent(QTimerEvent*)
@@ -506,24 +520,6 @@ Bitmap::Bitmap(quint8* buf, quint16 wordLen, quint16 pixWidth, quint16 pixHeight
     d_pixLineWidth = ( ( d_pixWidth + PixPerWord - 1 ) / PixPerWord ) * PixPerWord; // line width is a multiple of 16
     // d_pixWidth != d_pixLineWidth happens twice
     Q_ASSERT( d_pixLineWidth * d_pixHeight / 16 == d_wordLen );
-}
-
-static inline quint16 readU16( const quint8* data, int off )
-{
-    return ( quint8(data[off]) << 8 ) + quint8(data[off+1] );
-}
-
-quint16 Bitmap::wordAt(quint16 i) const
-{
-    i--; // Smalltalk array indexes start with 1
-    if( i >= d_wordLen )
-    {
-        // this happens five times, always in BitBlt::copyLoop
-        qCritical() << "ERROR: Bitmap::wordAt width" << d_pixWidth << "height" << d_pixHeight << "wordlen" << d_wordLen << "out of bounds" << i;
-        return 0;
-    }
-    Q_ASSERT( i < d_wordLen );
-    return readU16( d_buf, i * 2 );
 }
 
 static inline void writeU16( quint8* data, int off, quint16 val )

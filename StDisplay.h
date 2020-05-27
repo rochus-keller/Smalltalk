@@ -60,12 +60,23 @@ namespace St
         quint16 width() const { return d_pixWidth; }
         quint16 height() const { return d_pixHeight; }
         quint16 wordLen() const { return d_wordLen; }
-        quint16 wordAt(quint16 i ) const;
+        inline quint16 wordAt(quint16 i) const
+        {
+            i--; // Smalltalk array indexes start with 1
+            Q_ASSERT( i < d_wordLen );
+            return readU16( d_buf, i * 2 );
+        }
         void wordAtPut( quint16 i, quint16 v );
         bool isNull() const { return d_buf == 0; }
         bool isSameBuffer( const Bitmap& rhs ) const { return rhs.d_buf == d_buf; }
         QImage toImage() const;
         QImage toImage(quint16 x, quint16 y, quint16 w, quint16 h) const;
+    protected:
+        static inline quint16 readU16( const quint8* data, int off )
+        {
+            return ( quint8(data[off]) << 8 ) + quint8(data[off+1] );
+        }
+
     private:
         quint16 d_pixWidth, d_pixHeight, d_pixLineWidth, d_wordLen;
         quint8* d_buf;
@@ -97,6 +108,8 @@ namespace St
         quint16 nextEvent() { return d_events.dequeue(); }
         quint32 getTicks() const { return d_timer.elapsed(); }
         void drawRecord( int x, int y, int w, int h );
+        bool isRecOn() const { return d_recOn; }
+        void updateArea(const QRect& r);
     signals:
         void sigEventQueue();
 

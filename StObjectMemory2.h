@@ -126,7 +126,7 @@ namespace St
 
         bool hasPointerMembers( OOP objectPointer ) const;
         inline OOP fetchPointerOfObject( quint16 fieldIndex, OOP objectPointer ) const;
-        void storePointerOfObject( quint16 fieldIndex, OOP objectPointer, OOP withValue );
+        inline void storePointerOfObject( quint16 fieldIndex, OOP objectPointer, OOP withValue );
         quint16 fetchWordOfObject( quint16 fieldIndex, OOP objectPointer ) const;
         void storeWordOfObject( quint16 fieldIndex, OOP objectPointer, quint16 withValue );
         quint8 fetchByteOfObject( quint16 byteIndex, OOP objectPointer ) const;
@@ -182,6 +182,12 @@ namespace St
         static inline quint16 readU16( const quint8* data, int off )
         {
             return ( quint8(data[off]) << 8 ) + quint8(data[off+1] );
+        }
+
+        static inline void writeU16( quint8* data, int off, quint16 val )
+        {
+            data[off] = ( val >> 8 ) & 0xff;
+            data[off+1] = val & 0xff;
         }
 
     private:
@@ -280,6 +286,16 @@ namespace St
                 return wordToShift >> offset;
         }
     }
+
+    void ObjectMemory2::storePointerOfObject(quint16 fieldIndex, OOP objectPointer, OOP withValue)
+    {
+        Q_ASSERT( objectPointer != 0 );
+        const OtSlot& s = getSlot(objectPointer);
+        const quint32 off = fieldIndex * 2;
+        Q_ASSERT( fieldIndex < s.d_size );
+        writeU16( s.d_obj->d_data, off, withValue );
+    }
+
 }
 
 #endif // ST_OBJECT_MEMORY_2_H

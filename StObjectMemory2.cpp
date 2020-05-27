@@ -60,12 +60,6 @@ static inline void writeU16( QByteArray& data, int off, quint16 val )
     data[off+1] = val & 0xff;
 }
 
-static inline void writeU16( quint8* data, int off, quint16 val )
-{
-    data[off] = ( val >> 8 ) & 0xff;
-    data[off+1] = val & 0xff;
-}
-
 static const int methHdrByteLen = 2;
 static const int ValueIndex = methHdrByteLen / 2;
 
@@ -349,15 +343,6 @@ bool ObjectMemory2::hasPointerMembers(OOP objectPointer) const
         return false;
     const OtSlot& s = getSlot(objectPointer);
     return s.d_isPtr;
-}
-
-void ObjectMemory2::storePointerOfObject(quint16 fieldIndex, OOP objectPointer, OOP withValue)
-{
-    Q_ASSERT( objectPointer != 0 );
-    const OtSlot& s = getSlot(objectPointer);
-    const quint32 off = fieldIndex * 2;
-    Q_ASSERT( fieldIndex < s.d_size );
-    writeU16( s.d_obj->d_data, off, withValue );
 }
 
 quint16 ObjectMemory2::fetchWordOfObject(quint16 fieldIndex, OOP objectPointer) const

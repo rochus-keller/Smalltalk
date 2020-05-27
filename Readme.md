@@ -75,9 +75,11 @@ Here is a screenshot:
 
 ![Overview](http://software.rochus-keller.info/smalltalk80_image_viewer_0.5.png)
 
-### A Smalltalk-80 Virtual Machine
+### A Smalltalk-80 Interpreted Virtual Machine
 
-This is a Blue Book implementation and currently work in progress. The focus is on functionality and compliance with the Blue Book, not on performance (it performs decently though). The interpreter reproduces the original Xerox trace2 and trace3 files included with http://www.wolczko.com/st80/image.tar.gz. The initial screen after startup corresponds to the screenshot shown on page 3 of the "Smalltalk 80 Virtual Image Version 2" manual.
+This is a direct Blue Book implementation. The focus is on functionality and compliance with the Blue Book, not on performance (it performs decently though). The interpreter reproduces the original Xerox trace2 and trace3 files included with http://www.wolczko.com/st80/image.tar.gz. The initial screen after startup corresponds to the screenshot shown on page 3 of the "Smalltalk 80 Virtual Image Version 2" manual.
+
+The virtual machine now works quite well; there are still some update issues though.
 
 Note that you can press CTRL+left mouse button to simulate a right mouse button click, and CTRL+SHIFT+left mouse button to simulate a middle mouse button click. If you have a two button mouse, then you can also use SHIFT+right mouse button to simulate a middle mouse button click.
 
@@ -87,7 +89,7 @@ Here is a screenshot of the running VM after some interactions:
 
 ![Screenshot](http://software.rochus-keller.info/smalltalk80_vm_0.3.3.png)
 
-I don't seem to be the only one interested in an original Blue Book Smalltalk-80 VM. Today (May 18 2020) I found this very interesting post on Reddit: https://www.reddit.com/r/smalltalk/comments/glqbrh/in_honor_of_alans_birthday_by_the_bluebook_c/ which refers to https://github.com/dbanay/Smalltalk. The initial commit was apparently on May 12; the implementation is based on C++11 and SDL and seems to work very well (even a bit faster than this VM); I even found Blue Book fixes in dbanay's code which I didn't see anywhere else (thanks dbanay!). I will continue with my own implementation anyway, so I'm able to gradualy migrate it to a LuaJIT backend, if feasible.
+I don't seem to be the only one interested in an original Blue Book Smalltalk-80 VM. Today (May 18 2020) I found this very interesting post on Reddit: https://www.reddit.com/r/smalltalk/comments/glqbrh/in_honor_of_alans_birthday_by_the_bluebook_c/ which refers to https://github.com/dbanay/Smalltalk. The initial commit was apparently on May 12, but most files have a creation date of February or March, one even of December; so obviously it was quite some work; the implementation is based on C++11 and SDL and seems to work very well (even a little bit faster than this VM); I even found Blue Book fixes in dbanay's code which I didn't see anywhere else (thanks, Dan!). I will continue with my own implementation anyway, so I'm able to gradualy migrate it to a LuaJIT backend, if feasible.
 
 ### Binary versions
 

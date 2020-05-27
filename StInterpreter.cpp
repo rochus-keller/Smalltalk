@@ -23,6 +23,7 @@
 #include <QApplication>
 #include <math.h>
 #include <QDateTime>
+#include <QPainter>
 using namespace St;
 
 // #define ST_DO_TRACING
@@ -125,7 +126,7 @@ void Interpreter::interpret()
     while( Display::s_run ) // && cycleNr < 2000 ) // trace2 < 500 trace3 < 2000
     {
         cycle();
-        qApp->processEvents();
+        qApp->processEvents( QEventLoop::AllEvents | QEventLoop::WaitForMoreEvents, 10 );
     }
 }
 
@@ -253,13 +254,19 @@ Interpreter::OOP Interpreter::literal(qint16 offset)
     return memory->literalOfMethod( offset, memory->getRegister(Method) );
 }
 
+static inline quint16 _hash(Interpreter::OOP objectPointer)
+{
+    return objectPointer >> 1;
+}
+
 bool Interpreter::lookupMethodInDictionary(Interpreter::OOP dictionary)
 {
-    OOP messageSelector = memory->getRegister(MessageSelector);
-
-    // Just a trivial linear scan; not the more fancy hash lookup described in the Blue Book
     const int SelectorStart = 2;
     const int MethodArrayIndex = 1;
+    OOP messageSelector = memory->getRegister(MessageSelector);
+#if 0
+
+    // Just a trivial linear scan; not the more fancy hash lookup described in the Blue Book
     int length = memory->fetchWordLenghtOf(dictionary);
     for( int index = SelectorStart; index < length; index++ )
     {
@@ -274,6 +281,35 @@ bool Interpreter::lookupMethodInDictionary(Interpreter::OOP dictionary)
         }
     }
     return false;
+#else
+    // this version is about nine times faster than the linear version
+    const quint16 length = memory->fetchWordLenghtOf(dictionary);
+    const quint16 mask = length - SelectorStart - 1;
+    quint16 index = ( mask & _hash(messageSelector) ) + SelectorStart;
+    bool wrapAround = false;
+    while( true )
+    {
+        OOP nextSelector = memory->fetchPointerOfObject(index, dictionary);
+        if( nextSelector == ObjectMemory2::objectNil )
+            return false;
+        if( nextSelector == messageSelector )
+        {
+            const OOP methodArray = memory->fetchPointerOfObject(MethodArrayIndex, dictionary);
+            OOP newMethod = memory->fetchPointerOfObject(index - SelectorStart, methodArray);
+            memory->setRegister(NewMethod,newMethod);
+            primitiveIndex = memory->primitiveIndexOf(newMethod);
+            return true;
+        }
+        index = index + 1;
+        if( index == length )
+        {
+            if( wrapAround )
+                return false;
+            wrapAround = true;
+            index = SelectorStart;
+        }
+    }
+#endif
 }
 
 bool Interpreter::lookupMethodInClass(Interpreter::OOP cls)
@@ -2648,10 +2684,6 @@ void Interpreter::primitiveCopyBits()
     in.clipWidth = memory->integerValueOf( memory->fetchPointerOfObject(12,bitblt), true );
     in.clipHeight = memory->integerValueOf( memory->fetchPointerOfObject(13,bitblt), true );
 
-//    if( Display::inst()->getBitmap().isSameBuffer( destBits ) )
-//        qDebug() << "updating screen" << in.destX << in.destY << in.width << in.height
-//                 << "clipped at" << in.clipX << in.clipY << in.clipWidth << in.clipHeight;
-
 //    if( !halftoneBits.isNull() )
 //        Q_ASSERT( halftoneBits.width() == 16 && halftoneBits.height() == 16 ); // this always holds
 
@@ -2666,7 +2698,32 @@ void Interpreter::primitiveCopyBits()
 //        halftoneBits.toImage().save("halftone.png");
 //    }
 
-    Display::inst()->drawRecord( in.destX, in.destY, in.width, in.height );
+    Display* disp = Display::inst();
+    if( disp->getBitmap().isSameBuffer( destBits ) )
+    {
+        const QRect dest(in.destX, in.destY, in.width, in.height);
+        const QRect clip( in.clipX, in.clipY, in.clipWidth, in.clipHeight );
+        disp->updateArea( dest & clip );
+    }
+
+#if 0
+    if( disp->isRecOn() && Display::inst()->getBitmap().isSameBuffer( destBits ) )
+    {
+        qDebug() << cycleNr << "updating screen" << in.destX << in.destY << in.width << in.height
+                 << "clipped at" << in.clipX << in.clipY << in.clipWidth << in.clipHeight;
+        disp->drawRecord( in.destX, in.destY, in.width, in.height );
+        QImage img = destBits.toImage().convertToFormat(QImage::Format_RGB32);
+        if( false )
+        {
+            QPainter p(&img);
+            p.setPen(Qt::red);
+            p.drawRect(in.clipX, in.clipY, in.clipWidth, in.clipHeight);
+            p.setPen(Qt::green);
+            p.drawRect(in.destX, in.destY, in.width, in.height);
+        }
+        img.save(QString("step_%1.png").arg(cycleNr,8,10,QChar('0')));
+    }
+#endif
 
     // checked that if we pop BitBlt then the interpreter behaves stranegly and eventually crashes.
 }
