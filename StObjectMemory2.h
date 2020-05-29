@@ -237,8 +237,16 @@ namespace St
 
     ObjectMemory2::OOP ObjectMemory2::fetchPointerOfObject(quint16 fieldIndex, OOP objectPointer) const
     {
+        if( objectPointer == objectNil )
+            return objectNil;
+
         const OtSlot& s = getSlot(objectPointer);
         const quint32 off = fieldIndex * 2;
+
+//        OOP spec = fetchPointerOfObject2(2,s.getClass());
+//        if( ( spec & 0x8000 ) == 0 && s.getClass() != ObjectMemory2::classCompiledMethod )
+//            QByteArray("WARNING: accessing word or byte object by pointer"); // never happened so far; happens in method literals by primitiveObjectAt
+
         Q_ASSERT( fieldIndex < s.d_size );
         const OOP oop = readU16( s.d_obj->d_data, off );
         if( oop == 0 ) // BB (implicitly?) assumes that unused members are nil
@@ -290,6 +298,8 @@ namespace St
     void ObjectMemory2::storePointerOfObject(quint16 fieldIndex, OOP objectPointer, OOP withValue)
     {
         Q_ASSERT( objectPointer != 0 );
+        if( objectPointer == objectNil )
+            return;
         const OtSlot& s = getSlot(objectPointer);
         const quint32 off = fieldIndex * 2;
         Q_ASSERT( fieldIndex < s.d_size );

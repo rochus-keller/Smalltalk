@@ -308,7 +308,7 @@ namespace St
         void primitiveCursorLocPut();
         void primitiveTimeWordsInto();
         void primitiveTickWordsInto();
-        void primitiveSignalAtClick();
+        void primitiveSignalAtTick();
         static inline quint16 extractBits( quint8 from, quint8 to, quint16 of )
         {
             Q_ASSERT( from <= to && to <= 15 );

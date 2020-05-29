@@ -115,6 +115,8 @@ namespace St
 
     protected slots:
         void onRecord();
+        void onExit();
+        void onLog();
 
     protected:
         void paintEvent(QPaintEvent *);

@@ -22,12 +22,13 @@
 #include <QtDebug>
 #include <QApplication>
 #include <math.h>
-#include <QDateTime>
+#include <QDateTime> 
 #include <QPainter>
 using namespace St;
 
-// #define ST_DO_TRACING
-#define ST_DO_TRACE2
+//#define ST_DO_TRACING
+//#define ST_DO_TRACE2
+#define ST_TRACE3_PRIMITIVES
 #define ST_TRACE_SYSTEM_ERRORS
 
 #ifdef ST_DO_TRACING
@@ -50,7 +51,12 @@ using namespace St;
 #define ST_RETURN_BYTECODE(msg) qDebug() << level /*<< QByteArray(level,'\t').constData() */ << \
     "^" << ( "<" + QByteArray::number(currentBytecode) + ">" ).constData() << msg;
 #define ST_TRACE_BYTECODE(msg)
+#ifdef ST_TRACE3_PRIMITIVES
+#define ST_TRACE_PRIMITIVE(msg) qDebug() << level << "Primitive" << ( "#" + QByteArray::number(primitiveIndex)  ).constData() \
+    << __FUNCTION__ << msg;
+#else
 #define ST_TRACE_PRIMITIVE(msg)
+#endif
 #endif
 #else
 #define ST_TRACE_BYTECODE(msg)
@@ -87,9 +93,9 @@ static Bitmap fetchBitmap( ObjectMemory2* memory, Interpreter::OOP form )
 {
     if( form == ObjectMemory2::objectNil )
         return Bitmap();
-    Interpreter::OOP bitmap = memory->fetchWordOfObject(0,form);
-    qint16 width = memory->integerValueOf(memory->fetchWordOfObject(1,form));
-    qint16 height = memory->integerValueOf(memory->fetchWordOfObject(2,form));
+    Interpreter::OOP bitmap = memory->fetchPointerOfObject(0,form);
+    qint16 width = memory->integerValueOf(memory->fetchPointerOfObject(1,form));
+    qint16 height = memory->integerValueOf(memory->fetchPointerOfObject(2,form));
     // Q_ASSERT( memory->fetchByteLenghtOf(bitmap) == width * height / 8 );
     ObjectMemory2::ByteString bs = memory->fetchByteString(bitmap);
     Q_ASSERT( bs.d_bytes != 0 );
@@ -1646,7 +1652,7 @@ void Interpreter::dispatchInputOutputPrimitives()
         primitiveTickWordsInto();
         break;
     case 100:
-        primitiveSignalAtClick();
+        primitiveSignalAtTick();
         break;
     case 101:
         primitiveBeCursor();
@@ -1838,9 +1844,9 @@ void Interpreter::dispatchFloatPrimitives()
 
 void Interpreter::_addSubMulImp(char op)
 {
-    const qint16 integerArgument = popInteger();
-    const qint16 integerReceiver = popInteger();
-    qint16 integerResult = 0;
+    const int integerArgument = popInteger();
+    const int integerReceiver = popInteger();
+    int integerResult = 0;
     if( success )
     {
         switch(op)
@@ -1869,7 +1875,7 @@ void Interpreter::_floatOpImp(char op)
 {
     const float floatArgument = popFloat();
     const float floatReceiver = popFloat();
-    float floatResult = 0.0;
+    double floatResult = 0.0;
     if( success )
     {
         switch(op)
@@ -1952,6 +1958,10 @@ void Interpreter::primitiveAt()
     OOP arrayClass = memory->fetchClassOf(array);
     checkIndexableBoundsOf(index, array);
     OOP result = 0;
+
+//    qDebug() << "primitiveAt receiver" << memory->prettyValue(array).constData()
+//             << "index" << memory->prettyValue(index).constData();
+
     if( success )
     {
         index  = index + fixedFieldsOf(arrayClass);
@@ -1971,6 +1981,11 @@ void Interpreter::primitiveAtPut()
     OOP array = popStack();
     OOP arrayClass = memory->fetchClassOf(array);
     checkIndexableBoundsOf(index,array);
+
+//    qDebug() << "primitiveAtPut receiver" << memory->prettyValue(array).constData()
+//             << "index" << memory->prettyValue(index).constData()
+//             << "value" << memory->prettyValue(value).constData();
+
     if( success )
     {
         index = index + fixedFieldsOf(arrayClass);
@@ -2192,6 +2207,11 @@ void Interpreter::primitiveObjectAtPut()
     OOP thisReceiver = popStack();
     successUpdate( index > 0);
     successUpdate( index <= ( memory->objectPointerCountOf(thisReceiver) ) );
+
+//    qDebug() << "primitiveObjectAtPut receiver" << memory->prettyValue(thisReceiver).constData()
+//             << "index" << memory->prettyValue(index).constData()
+//             << "value" << memory->prettyValue(newValue).constData();
+
     if( success )
     {
         memory->storePointerOfObject(index-1, thisReceiver, newValue );
@@ -2275,6 +2295,11 @@ void Interpreter::primitiveInstVarAtPut()
     int index = popInteger();
     OOP thisReceiver = popStack();
     checkInstanceVariableBoundsOf(index,thisReceiver);
+
+//    qDebug() << "primitiveInstVarAtPut receiver" << memory->prettyValue(thisReceiver).constData()
+//             << "index" << memory->prettyValue(index).constData()
+//             << "value" << memory->prettyValue(newValue).constData();
+
     if( success )
         subscriptWithStoring(thisReceiver,index,newValue);
     if( success )
@@ -2649,7 +2674,6 @@ void Interpreter::primitiveBeDisplay()
 
 void Interpreter::primitiveCopyBits()
 {
-    ST_TRACE_PRIMITIVE("");
     // primitive 96
 
     /* Stack:
@@ -2658,11 +2682,15 @@ void Interpreter::primitiveCopyBits()
     7 "3"
     6 "<a Rectangle>"
     */
-    OOP bitblt = stackValue(0);
+    OOP bitblt = stackTop();
 
     Bitmap destBits = fetchBitmap(memory, memory->fetchPointerOfObject(0,bitblt) );
     Bitmap sourceBits = fetchBitmap(memory, memory->fetchPointerOfObject(1,bitblt) );
     Bitmap halftoneBits = fetchBitmap(memory, memory->fetchPointerOfObject(2,bitblt) );
+
+    Display* disp = Display::inst();
+    const bool drawToDisp = disp->getBitmap().isSameBuffer( destBits );
+    ST_TRACE_PRIMITIVE( ( drawToDisp ? "to display" : "offscreen" ) );
 
     BitBlt::Input in;
     if( !destBits.isNull() )
@@ -2690,16 +2718,7 @@ void Interpreter::primitiveCopyBits()
     BitBlt bb( in );
     bb.copyBits();
 
-//    if( in.width < 16 && in.height < 16 )
-//    {
-//        destBits.toImage().save("dest.png");
-//        sourceBits.toImage().save("source.png");
-//        sourceBits.toImage(in.sourceX,in.sourceY,in.width,in.height).save("sourcecut.png");
-//        halftoneBits.toImage().save("halftone.png");
-//    }
-
-    Display* disp = Display::inst();
-    if( disp->getBitmap().isSameBuffer( destBits ) )
+    if( drawToDisp )
     {
         const QRect dest(in.destX, in.destY, in.width, in.height);
         const QRect clip( in.clipX, in.clipY, in.clipWidth, in.clipHeight );
@@ -2707,13 +2726,14 @@ void Interpreter::primitiveCopyBits()
     }
 
 #if 0
-    if( disp->isRecOn() && Display::inst()->getBitmap().isSameBuffer( destBits ) )
+    if( disp->isRecOn() && drawToDisp )
     {
-        qDebug() << cycleNr << "updating screen" << in.destX << in.destY << in.width << in.height
-                 << "clipped at" << in.clipX << in.clipY << in.clipWidth << in.clipHeight;
+//        qDebug() << cycleNr << "updating screen" << in.destX << in.destY << in.width << in.height
+//                 << "clipped at" << in.clipX << in.clipY << in.clipWidth << in.clipHeight;
+        qDebug() << "copyBits" << in.destX << in.destY << in.width << in.height << in.combinationRule;
         disp->drawRecord( in.destX, in.destY, in.width, in.height );
         QImage img = destBits.toImage().convertToFormat(QImage::Format_RGB32);
-        if( false )
+        if( true )
         {
             QPainter p(&img);
             p.setPen(Qt::red);
@@ -2724,8 +2744,6 @@ void Interpreter::primitiveCopyBits()
         img.save(QString("step_%1.png").arg(cycleNr,8,10,QChar('0')));
     }
 #endif
-
-    // checked that if we pop BitBlt then the interpreter behaves stranegly and eventually crashes.
 }
 
 void Interpreter::primitiveStringReplace()
@@ -2752,11 +2770,10 @@ void Interpreter::dumpStack_(const char* title)
 void Interpreter::primitiveBeCursor()
 {
     ST_TRACE_PRIMITIVE("");
-    OOP cursor = stackValue(0);
+    OOP cursor = popStack();
 
     Display::inst()->setCursorBitmap( fetchBitmap(memory, cursor ) );
 
-    pop(1); // cursor instance
 }
 
 void Interpreter::primitiveCursorLink()
@@ -2819,7 +2836,7 @@ void Interpreter::primitiveSignalAtOopsLeftWordsLeft()
     OOP semaphore =  popStack();
 
     // BB error: not documented, neither in VIM
-    qDebug() << "WARNING: primitiveSignalAtOopsLeftWordsLeft not implemented" << memory->prettyValue(number1).constData()
+    qWarning() << "WARNING: primitiveSignalAtOopsLeftWordsLeft not implemented" << memory->prettyValue(number1).constData()
              << memory->prettyValue(number2).constData() << memory->prettyValue(semaphore).constData();
 }
 
@@ -2856,7 +2873,7 @@ void Interpreter::primitiveTickWordsInto()
     memory->storeByteOfObject(0,oop, ticks & 0xff );
 }
 
-void Interpreter::primitiveSignalAtClick()
+void Interpreter::primitiveSignalAtTick()
 {
     ST_TRACE_PRIMITIVE("");
     OOP oop = popStack();

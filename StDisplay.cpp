@@ -35,6 +35,21 @@ static Display* s_inst = 0;
 bool Display::s_run = true;
 static const int s_msPerFrame = 30; // 20ms according to BB
 enum { whitePixel = 1, blackPixel = 0 };
+static QFile s_out("st.log");
+
+static QtMessageHandler s_oldHandler = 0;
+void messageHander(QtMsgType type, const QMessageLogContext& ctx, const QString& message)
+{
+    if( type == QtDebugMsg )
+    {
+        if( s_out.isOpen() )
+        {
+            s_out.write(message.toUtf8());
+            s_out.write("\n");
+        }
+    }else if( s_oldHandler )
+        s_oldHandler(type, ctx, message );
+}
 
 Display::Display(QWidget *parent) : QWidget(parent),d_curX(-1),d_curY(-1),d_capsLockDown(false),
     d_shiftDown(false),d_recOn(false)
@@ -48,6 +63,10 @@ Display::Display(QWidget *parent) : QWidget(parent),d_curX(-1),d_curY(-1),d_caps
     d_timer.start();
     // startTimer(s_msPerFrame);
     new QShortcut(tr("ALT+R"), this, SLOT(onRecord()) );
+    new QShortcut(tr("ALT+X"), this, SLOT(onExit()) );
+    new QShortcut(tr("ALT+L"), this, SLOT(onLog()) );
+
+    s_oldHandler = qInstallMessageHandler(messageHander);
 }
 
 Display*Display::inst()
@@ -134,16 +153,34 @@ void Display::onRecord()
 {
     if( !d_recOn )
     {
-        qDebug() << "record on";
+        qWarning() << "record on";
         d_recOn = true;
         d_record = d_screen.convertToFormat(QImage::Format_RGB32);
     }else
     {
-        qDebug() << "record off";
+        qWarning() << "record off";
         d_record.save("record.png");
         d_record = QImage();
         d_recOn = false;
     }
+}
+
+void Display::onExit()
+{
+    exit(0);
+}
+
+void Display::onLog()
+{
+    if( s_out.isOpen() )
+    {
+        qWarning() << "logging off";
+        s_out.close();
+    }else if( s_out.open(QIODevice::WriteOnly) )
+    {
+        qWarning() << "logging on";
+    }else
+        qCritical() << "ERROR: cannot open log for writing";
 }
 
 void Display::paintEvent(QPaintEvent* event)
@@ -275,7 +312,7 @@ void Display::mousePressReleaseImp(bool press, int button)
 
 void Display::keyPressEvent(QKeyEvent* event)
 {
-    //qDebug() << QByteArray::number(event->key(),16).constData() << event->text();
+    qDebug() << "keyPressEvent" << QByteArray::number(event->key(),16).constData() << event->text();
     char ch = 0;
     if( !event->text().isEmpty() )
         ch = event->text()[0].toLatin1();
@@ -818,6 +855,9 @@ quint16 BitBlt::merge(quint16 combinationRule, quint16 source, quint16 destinati
         return ~source | ~destination;
     case 15:
         return AllOnes;
+    default:
+        Q_ASSERT( false );
+        break;
     }
     return 0;
 }

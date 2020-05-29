@@ -92,7 +92,7 @@ bool ObjectMemory2::readFrom(QIODevice* in)
 
     in->seek( 512 );
 
-    qDebug() << "object space" << objectSpaceLenBytes << "bytes, object table" << objectTableLenBytes << "bytes";
+    // qDebug() << "object space" << objectSpaceLenBytes << "bytes, object table" << objectTableLenBytes << "bytes";
 
     // Object Space format:
     // | xxxxxxxx xxxxxxxx | word size
@@ -174,7 +174,7 @@ bool ObjectMemory2::readFrom(QIODevice* in)
             const int len = fetchWordLenghtOf(oop);
             for( int j = 0; j < len; j++ )
             {
-                quint16 ptr = fetchWordOfObject(j,oop);
+                quint16 ptr = fetchPointerOfObject(j,oop);
                 if( !isInt(ptr) && ptr != objectNil && ptr != objectTrue && ptr != objectFalse )
                     d_xref[ptr].append(oop);
             }
@@ -347,8 +347,16 @@ bool ObjectMemory2::hasPointerMembers(OOP objectPointer) const
 
 quint16 ObjectMemory2::fetchWordOfObject(quint16 fieldIndex, OOP objectPointer) const
 {
+    if( objectPointer == objectNil )
+        return 0;
+
     const OtSlot& s = getSlot(objectPointer);
     const quint32 off = fieldIndex * 2;
+
+//    OOP spec = fetchPointerOfObject(2,s.getClass());
+//    if( spec & 0x8000 || ( spec & 0x4000 ) == 0 )
+//        qWarning() << "WARNING: accessing pointer or byte object by word"; // with recent fixes never happened so far
+
     Q_ASSERT( fieldIndex < s.d_size );
     return readU16( s.d_obj->d_data, off );
 }
@@ -365,6 +373,11 @@ quint8 ObjectMemory2::fetchByteOfObject(quint16 byteIndex, OOP objectPointer) co
 {
     const OtSlot& s = getSlot(objectPointer);
     const quint32 off = byteIndex;
+
+//    OOP spec = fetchPointerOfObject(2,s.getClass());
+//    if( spec & 0x8000 || spec & 0x4000 )
+//        qWarning() << "WARNING: accessing pointer or word object by bytes"; // never happened so far
+
     Q_ASSERT( !s.d_isPtr && off < s.byteLen() );
     return s.d_obj->d_data[off];
 }
