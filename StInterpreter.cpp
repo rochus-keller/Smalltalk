@@ -132,7 +132,7 @@ void Interpreter::interpret()
     while( Display::s_run ) // && cycleNr < 2000 ) // trace2 < 500 trace3 < 2000
     {
         cycle();
-        qApp->processEvents( QEventLoop::AllEvents | QEventLoop::WaitForMoreEvents, 10 );
+        qApp->processEvents();
     }
 }
 

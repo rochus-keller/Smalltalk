@@ -661,7 +661,7 @@ qint16 ObjectMemory2::integerValueOf(OOP objectPointer, bool doAssert)
             return tcomp;
     }else if( doAssert )
         Q_ASSERT( false );
-    else
+    // else
         return 0;
 }
 

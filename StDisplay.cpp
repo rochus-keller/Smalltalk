@@ -312,7 +312,7 @@ void Display::mousePressReleaseImp(bool press, int button)
 
 void Display::keyPressEvent(QKeyEvent* event)
 {
-    qDebug() << "keyPressEvent" << QByteArray::number(event->key(),16).constData() << event->text();
+    //qDebug() << "keyPressEvent" << QByteArray::number(event->key(),16).constData() << event->text();
     char ch = 0;
     if( !event->text().isEmpty() )
         ch = event->text()[0].toLatin1();
