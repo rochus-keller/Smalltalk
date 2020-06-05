@@ -83,6 +83,7 @@ namespace St
             classSymbol = 0x38,
             classMethodDictionary = 0x4c,
             classLargeNegativeInteger = 0x1da0,
+            classProcess = 0x7a4,
         };
 
         enum CompiledMethodFlags {
@@ -107,6 +108,7 @@ namespace St
         ObjectMemory2(QObject* p = 0);
         bool readFrom( QIODevice* );
         void collectGarbage();
+        void updateRefs();
 
         QList<quint16> getAllValidOop() const;
         const QSet<quint16>& getObjects() const {return d_objects; }
@@ -150,7 +152,7 @@ namespace St
         CompiledMethodFlags flagValueOf( OOP methodPointer ) const;
         bool largeContextFlagOf( OOP methodPointer ) const;
         quint8 literalCountOf( OOP methodPointer ) const;
-        ByteString methodBytecodes( OOP methodPointer ) const;
+        ByteString methodBytecodes(OOP methodPointer , int* startPc = 0) const;
         quint8 argumentCountOf(OOP methodPointer ) const;
         quint8 primitiveIndexOf(OOP methodPointer ) const;
         OOP literalOfMethod(quint8 index, OOP methodPointer ) const;

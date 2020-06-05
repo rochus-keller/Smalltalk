@@ -19,17 +19,21 @@
 
 #include "StDisplay.h"
 #include "StInterpreter.h"
+#include "StImageViewer.h"
 #include <QtDebug>
 #include <QApplication>
 #include <math.h>
 #include <QDateTime> 
 #include <QPainter>
+#include <QEventLoop>
+#include <QVBoxLayout>
 using namespace St;
 
 //#define ST_DO_TRACING
 //#define ST_DO_TRACE2
 #define ST_TRACE3_PRIMITIVES
 #define ST_TRACE_SYSTEM_ERRORS
+//#define ST_DO_SCREEN_RECORDING
 
 #ifdef ST_DO_TRACING
 #ifdef ST_DO_TRACE2
@@ -121,9 +125,6 @@ void Interpreter::interpret()
     cycleNr = 0;
     level = 0;
     newActiveContext( firstContext() ); // BB: When Smalltalk is started up, ...
-    //OOP method = memory->getRegister(Method);
-    //QPair<OOP,OOP> selector = memory->findSelectorAndOwningClassOf(method);
-    //memory->setRegister(MessageSelector,selector.first);
 
     // apparently the system is in ScreenController->startUp->controlLoop->controlActivity->yellowButtonActivity
     //     ->quit->saveAs:thenQuit:->snapshotAs:thenQuit:
@@ -133,6 +134,8 @@ void Interpreter::interpret()
     {
         cycle();
         qApp->processEvents();
+        if( Display::s_break )
+            onBreak();
     }
 }
 
@@ -411,6 +414,41 @@ void Interpreter::onTimeout()
     // qWarning() << "onTimeout";
     if( toSignal )
         asynchronousSignal(toSignal);
+}
+
+void Interpreter::onBreak()
+{
+    memory->collectGarbage();
+    QEventLoop loop;
+    ImageViewer v;
+    connect( &v, SIGNAL(sigClosing()), &loop, SLOT(quit()) );
+    ImageViewer::Registers r;
+    r["activeContext"] = memory->getRegister(ActiveContext);
+    r["homeContext"] = memory->getRegister(HomeContext);
+    r["method"] = memory->getRegister(Method);
+    r["receiver"] = memory->getRegister(Receiver);
+    r["messageSelector"] = memory->getRegister(MessageSelector);
+    r["newMethod"] = memory->getRegister(NewMethod);
+    r["newProcess"] = memory->getRegister(NewProcess);
+    r["inputSemaphore"] = memory->getRegister(InputSemaphore);
+    r["stackPointer"] = memory->integerObjectOf(stackPointer);
+    r["instructionPointer"] = memory->integerObjectOf(instructionPointer);
+    r["argumentCount"] = memory->integerObjectOf(argumentCount);
+    r["primitiveIndex"] = memory->integerObjectOf(primitiveIndex);
+    // r["cycleNumber"] = cycleNr;
+    r["currentBytecode"] = memory->integerObjectOf(currentBytecode);
+    r["success"] = success ? ObjectMemory2::objectTrue : ObjectMemory2::objectFalse;
+    r["newProcessWaiting"] = newProcessWaiting ? ObjectMemory2::objectTrue : ObjectMemory2::objectFalse;
+
+    v.show(memory, r);
+    loop.exec();
+    if( v.isNextStep() )
+        qWarning() << "next step";
+    else
+    {
+        Display::s_break = false;
+        qWarning() << "break finished";
+    }
 }
 
 void Interpreter::checkProcessSwitch()
@@ -2725,7 +2763,7 @@ void Interpreter::primitiveCopyBits()
         disp->updateArea( dest & clip );
     }
 
-#if 0
+#ifdef ST_DO_SCREEN_RECORDING
     if( disp->isRecOn() && drawToDisp )
     {
 //        qDebug() << cycleNr << "updating screen" << in.destX << in.destY << in.width << in.height

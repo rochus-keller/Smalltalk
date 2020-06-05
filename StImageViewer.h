@@ -27,6 +27,7 @@ class QTreeWidget;
 class QTextBrowser;
 class QLabel;
 class QTreeWidgetItem;
+class QComboBox;
 
 #define ST_OBJECT_MEMORY ObjectMemory2
 
@@ -39,8 +40,18 @@ namespace St
     {
         Q_OBJECT
     public:
-        ImageViewer();
+        ImageViewer(QWidget* = 0);
         bool parse( const QString& path );
+        typedef QMap<QByteArray,quint16> Registers;
+        void show(ST_OBJECT_MEMORY*, const Registers&);
+        bool isNextStep() const { return d_nextStep; }
+    signals:
+        void sigClosing();
+
+    public slots:
+        void onContinue();
+        void onNextStep();
+
     protected:
         void createObjectTable();
         void createClasses();
@@ -52,6 +63,7 @@ namespace St
         void createDetail();
         void closeEvent(QCloseEvent* event);
         void showDetail( quint16 );
+        void createStack();
         QString detailText( quint16 );
         QString objectDetailText( quint16 );
         QString classDetailText( quint16 );
@@ -63,6 +75,10 @@ namespace St
         static QPair<QString,int> bytecodeText(const quint8* , int pc);
         void pushLocation(quint16);
         QPair<quint16,quint16> findSelectorAndClass(quint16 methodOop) const;
+        void fillRegs(const Registers&);
+        void syncAll(quint16, QObject* cause = 0, bool push = true );
+        void fillStack( quint16 activeContext );
+        void fillProcs(quint16 activeContext = 0);
     protected slots:
         void onObject( quint16 );
         void onClassesClicked();
@@ -75,6 +91,8 @@ namespace St
         void onGotoAddr();
         void onFindText();
         void onFindNext();
+        void onRefsClicked(QTreeWidgetItem*,int);
+        void onProcess(int);
     private:
         friend class ObjectTree;
         ST_OBJECT_MEMORY* d_om;
@@ -84,13 +102,15 @@ namespace St
         QTreeWidget* d_classes;
         QTreeWidget* d_xref;
         QTreeWidget* d_insts;
+        QTreeWidget* d_stack;
+        QComboBox* d_procs;
         QLabel* d_xrefTitle;
         QLabel* d_instsTitle;
         QTextBrowser* d_detail;
         QList<quint16> d_backHisto; // d_backHisto.last() is the current location
         QList<quint16> d_forwardHisto;
         QString d_textToFind;
-        bool d_pushBackLock;
+        bool d_pushBackLock, d_nextStep;
     };
 
     class ObjectTree : public QTreeView

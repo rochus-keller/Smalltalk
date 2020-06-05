@@ -36,6 +36,7 @@
 #include <QLabel>
 #include <QShortcut>
 #include <QInputDialog>
+#include <QComboBox>
 using namespace St;
 
 class ImageViewer::Model : public QAbstractItemModel
@@ -465,9 +466,13 @@ public:
     QHash<quint16,QByteArray> d_knowns;
 };
 
-ImageViewer::ImageViewer():d_pushBackLock(false)
+ImageViewer::ImageViewer(QWidget*p):QMainWindow(p),d_pushBackLock(false),d_nextStep(false)
 {
+#ifndef ST_IMG_VIEWER_EMBEDDED
     d_om = new ST_OBJECT_MEMORY(this);
+#else
+    d_om = 0;
+#endif
 
     setDockNestingEnabled(true);
     setCorner( Qt::BottomRightCorner, Qt::RightDockWidgetArea );
@@ -480,9 +485,10 @@ ImageViewer::ImageViewer():d_pushBackLock(false)
     createDetail();
     createXref();
     createInsts();
+    createStack();
 
+#ifndef ST_IMG_VIEWER_EMBEDDED
     QSettings s;
-
     const QRect screen = QApplication::desktop()->screenGeometry();
     resize( screen.width() - 20, screen.height() - 30 ); // so that restoreState works
     if( s.value("Fullscreen").toBool() )
@@ -495,6 +501,7 @@ ImageViewer::ImageViewer():d_pushBackLock(false)
         restoreState( state.toByteArray() );
 
     setWindowTitle(tr("%1 %2").arg(qApp->applicationName()).arg(qApp->applicationVersion()));
+#endif
 
     new QShortcut(tr("ALT+LEFT"),this,SLOT(onGoBack()));
     new QShortcut(tr("ALT+RIGHT"),this,SLOT(onGoForward()));
@@ -519,7 +526,52 @@ bool ImageViewer::parse(const QString& path)
     d_backHisto.clear();
     d_forwardHisto.clear();
     fillClasses();
+    fillProcs();
     return res;
+}
+
+void ImageViewer::show(ST_OBJECT_MEMORY* om, const Registers& regs)
+{
+    Q_ASSERT( om != 0 );
+    d_om = om;
+    d_om->updateRefs();
+    d_mdl->setOm(d_om);
+    d_backHisto.clear();
+    d_forwardHisto.clear();
+    fillClasses();
+    fillRegs(regs);
+    fillProcs(regs.value("activeContext"));
+
+    QSettings s;
+
+    const QRect screen = QApplication::desktop()->screenGeometry();
+    resize( screen.width() - 20, screen.height() - 30 ); // so that restoreState works
+    if( s.value("Fullscreen").toBool() )
+        showFullScreen();
+    else
+        showMaximized();
+
+    const QVariant state = s.value( "DockState" );
+    if( !state.isNull() )
+        restoreState( state.toByteArray() );
+
+    setWindowTitle(tr("%1 %2").arg(qApp->applicationName()).arg(qApp->applicationVersion()));
+
+    new QShortcut(tr("F5"), this, SLOT(onContinue()) );
+    new QShortcut(tr("F10"), this, SLOT(onNextStep()) );
+
+}
+
+void ImageViewer::onContinue()
+{
+    d_nextStep = false;
+    close();
+}
+
+void ImageViewer::onNextStep()
+{
+    d_nextStep = true;
+    close();
 }
 
 void ImageViewer::createObjectTable()
@@ -688,11 +740,34 @@ void ImageViewer::closeEvent(QCloseEvent* event)
     QSettings s;
     s.setValue( "DockState", saveState() );
     event->setAccepted(true);
+    emit sigClosing();
 }
 
 void ImageViewer::showDetail(quint16 oop)
 {
     d_detail->setHtml( detailText(oop) );
+}
+
+void ImageViewer::createStack()
+{
+    QDockWidget* dock = new QDockWidget( tr("Call chain of Process"), this );
+    dock->setObjectName("Stack");
+    dock->setAllowedAreas( Qt::AllDockWidgetAreas );
+    dock->setFeatures( QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetClosable );
+    QWidget* pane = new QWidget(dock);
+    QVBoxLayout* vbox = new QVBoxLayout(pane);
+    vbox->setMargin(0);
+    d_procs = new QComboBox(pane);
+    vbox->addWidget(d_procs);
+    d_stack = new QTreeWidget(pane);
+    d_stack->setAlternatingRowColors(true);
+    d_stack->setHeaderLabels(QStringList() << "level" << "context" << "home" << "class/method" );
+    d_stack->setRootIsDecorated(false);
+    vbox->addWidget(d_stack);
+    dock->setWidget(pane);
+    addDockWidget( Qt::RightDockWidgetArea, dock );
+    connect( d_stack, SIGNAL(itemClicked(QTreeWidgetItem*,int)), this, SLOT(onXrefClicked(QTreeWidgetItem*,int)) );
+    connect( d_procs, SIGNAL(activated(int)), this, SLOT(onProcess(int)));
 }
 
 QString ImageViewer::detailText(quint16 oop)
@@ -878,7 +953,8 @@ QString ImageViewer::methodDetailText(quint16 oop)
         out << "</table>";
     }
 
-    ST_OBJECT_MEMORY::ByteString bs = d_om->methodBytecodes(oop);
+    int startPc;
+    ST_OBJECT_MEMORY::ByteString bs = d_om->methodBytecodes(oop, &startPc );
     if( bs.d_byteLen > 0 )
     {
         out << "<h3>Bytecode</h3>";
@@ -887,7 +963,7 @@ QString ImageViewer::methodDetailText(quint16 oop)
         while( pc < bs.d_byteLen )
         {
             QPair<QString,int> res = bytecodeText(bs.d_bytes, pc);
-            out << "<tr><td>";
+            out << "<tr><td>" << pc + startPc << "</td><td>";
             out << QString("%1").arg(bs.d_bytes[pc],3,10,QChar('0'));
             for( int i = 1; i < res.second; i++ )
                 out << "<br>" << QString("%1").arg(bs.d_bytes[pc+i],3,10,QChar('0'));
@@ -1046,11 +1122,11 @@ QPair<QString, int> ImageViewer::bytecodeText(const quint8* bc, int pc)
     if( b >= 152 && b <= 159 )
         return qMakePair( QString("Pop and Jump 0n False %1 +1 (i.e., 1 through 8)").arg( b & 0x7 ), 1 );
     if( b >= 160 && b <= 167 )
-        return qMakePair( QString("Jump(%1 - 4) *256+%2").arg( b & 0x7 ).arg( bc[pc+1] ), 2 );
+        return qMakePair( QString("Jump (%1 - 4)*256+%2").arg( b & 0x7 ).arg( bc[pc+1] ), 2 );
     if( b >= 168 && b <= 171 )
-        return qMakePair( QString("Pop and Jump On True %1 *256+%2").arg( b & 0x3 ).arg( bc[pc+1] ), 2 );
+        return qMakePair( QString("Pop and Jump On True %1*256+%2").arg( b & 0x3 ).arg( bc[pc+1] ), 2 );
     if( b >= 172 && b <= 175 )
-        return qMakePair( QString("Pop and Jump On False %1 *256+%2").arg( b & 0x3 ).arg( bc[pc+1] ), 2 );
+        return qMakePair( QString("Pop and Jump On False %1*256+%2").arg( b & 0x3 ).arg( bc[pc+1] ), 2 );
     if( b >= 176 && b <= 191 )
         // see array 0x30 specialSelectors
         return qMakePair( QString("Send Arithmetic Message #%1" ).arg( b & 0xf ), 1 );
@@ -1115,6 +1191,142 @@ QPair<quint16, quint16> ImageViewer::findSelectorAndClass(quint16 methodOop) con
     return qMakePair(sym,cls);
 }
 
+void ImageViewer::fillRegs(const Registers& regs)
+{
+    QDockWidget* dock = new QDockWidget( tr("Registers"), this );
+    dock->setObjectName("Regs");
+    dock->setAllowedAreas( Qt::AllDockWidgetAreas );
+    dock->setFeatures( QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetClosable );
+    QTreeWidget* r = new QTreeWidget(dock);
+    r->setAlternatingRowColors(true);
+    r->setHeaderLabels(QStringList() << "name" << "value");
+    r->setRootIsDecorated(false);
+    dock->setWidget(r);
+    addDockWidget( Qt::LeftDockWidgetArea, dock );
+
+    Registers::const_iterator i;
+    for( i = regs.begin(); i != regs.end(); ++i )
+    {
+        QTreeWidgetItem* item = new QTreeWidgetItem(r);
+        item->setText(0,i.key());
+        item->setText(1, d_om->prettyValue(i.value()) );
+        item->setToolTip(1, QString::number( i.value(), 16 ) );
+        item->setData(1,Qt::UserRole, i.value() );
+    }
+
+    r->resizeColumnToContents(0);
+
+    connect( r, SIGNAL(itemClicked(QTreeWidgetItem*,int)), this, SLOT(onRefsClicked(QTreeWidgetItem*,int)) );
+}
+
+void ImageViewer::syncAll(quint16 oop, QObject* cause, bool push)
+{
+    showDetail(oop);
+    if( cause != d_classes )
+        syncClasses(oop);
+    if( cause != d_tree )
+        syncObjects(oop);
+    fillInsts(oop);
+    fillXref(oop);
+    if( push )
+        pushLocation(oop);
+}
+
+void ImageViewer::fillStack(quint16 activeContext)
+{
+    d_stack->clear();
+
+    if( activeContext == 0 )
+        return;
+
+    int level = 0;
+    const quint16 nil = ObjectMemory2::objectNil;
+    while( activeContext != nil )
+    {
+        QTreeWidgetItem* item = new QTreeWidgetItem(d_stack);
+        item->setText(0, QString::number(level++) );
+
+        const quint16 sender = d_om->fetchPointerOfObject( 0, activeContext );
+        quint16 homeContext = activeContext;
+        quint16 method = d_om->fetchPointerOfObject( 3, activeContext );
+        if( d_om->isIntegerObject(method) )
+        {
+            // activeContext is a block context
+            homeContext = d_om->fetchPointerOfObject( 5, activeContext );
+            method = d_om->fetchPointerOfObject( 3, homeContext );
+        }
+
+        QPair<quint16,quint16> selCls = findSelectorAndClass(method);
+        QString methodName;
+        if( selCls.first != 0 )
+            methodName = (const char*)d_om->fetchByteString(selCls.first).d_bytes;
+        else
+            methodName = d_om->prettyValue(method);
+        if( selCls.second != 0 )
+            methodName = QString("%2 %1").arg(methodName).arg( d_om->fetchClassName(selCls.second).constData() );
+
+        if( homeContext != activeContext )
+        {
+            // this is a block
+            if( homeContext != sender && sender != nil )
+            {
+                item->setText(1, QString("%1 Closure").arg( activeContext, 0, 16) );
+            }else
+            {
+                item->setText(1, QString("%1 Block").arg( activeContext, 0, 16) );
+            }
+            item->setText(2, QString("%1%2").arg( homeContext, 0, 16).
+                          arg( d_om->fetchPointerOfObject(0,homeContext) == nil ? " root" : "" ) );
+            item->setData(2, Qt::UserRole, homeContext );
+        }else
+        {
+            item->setText(1, QString("%1").arg( activeContext, 0, 16) );
+        }
+
+        item->setData(1, Qt::UserRole, activeContext );
+
+        item->setText(3, methodName );
+        item->setData(3, Qt::UserRole, method );
+
+        activeContext = sender;
+    }
+}
+
+void ImageViewer::fillProcs(quint16 activeContext)
+{
+    d_procs->clear();
+
+    const quint16 scheduler = d_om->fetchPointerOfObject(1, ObjectMemory2::processor ); // see Interpreter::firstContext()
+    const quint16 activeProcess = d_om->fetchPointerOfObject(1, scheduler );
+    if( activeContext == 0 )
+        activeContext = d_om->fetchPointerOfObject(1, activeProcess );
+
+    QMap<QString,quint16> sort;
+    QList<quint16> objs = d_om->getAllValidOop();
+    for( int i = 0; i < objs.size(); i++ )
+    {
+        if( d_om->fetchClassOf( objs[i] ) == ObjectMemory2::classProcess )
+        {
+            sort.insert( QString("%1 prio %2").arg(objs[i],0,16)
+                         .arg(d_om->integerValueOf(d_om->fetchPointerOfObject(2,objs[i]))), objs[i] );
+        }
+    }
+
+    QMap<QString,quint16>::const_iterator i;
+    for( i = sort.begin(); i != sort.end(); ++i )
+    {
+        const bool isActive = i.value() == activeProcess;
+        QString text = i.key();
+        if( isActive )
+            text += " active";
+        d_procs->addItem( text, i.value() );
+        if( isActive )
+            d_procs->setCurrentIndex( d_procs->count() - 1);
+    }
+
+    fillStack( activeContext );
+}
+
 void ImageViewer::onObject(quint16 oop)
 {
     if( QApplication::keyboardModifiers() == Qt::ControlModifier )
@@ -1134,11 +1346,7 @@ void ImageViewer::onObject(quint16 oop)
         connect( tv, SIGNAL(sigObject(quint16)), this, SLOT(onObject(quint16)) );
     }else
     {
-        showDetail(oop);
-        syncClasses(oop);
-        fillXref(oop);
-        fillInsts(oop);
-        pushLocation(oop);
+        syncAll(oop,d_tree,true);
     }
 }
 
@@ -1149,11 +1357,7 @@ void ImageViewer::onClassesClicked()
         return;
 
     const quint16 oop = item->data(0,Qt::UserRole).toUInt();
-    syncObjects(oop);
-    showDetail(oop);
-    fillXref(oop);
-    fillInsts(oop);
-    pushLocation(oop);
+    syncAll(oop, d_classes, true );
 }
 
 void ImageViewer::onLink(const QUrl& url)
@@ -1178,12 +1382,7 @@ void ImageViewer::onLink(const QUrl& url)
         tb->setHtml( detailText(oop) );
     }else
     {
-        showDetail(oop);
-        syncClasses(oop);
-        syncObjects(oop);
-        fillXref(oop);
-        fillInsts(oop);
-        pushLocation(oop);
+        syncAll(oop);
     }
 }
 
@@ -1192,12 +1391,7 @@ void ImageViewer::onLink(const QString& link)
     if( !link.startsWith( "oop:" ) )
         return;
     quint16 oop = link.mid(4).toUInt(0,16);
-    showDetail(oop);
-    syncClasses(oop);
-    syncObjects(oop);
-    fillXref(oop);
-    fillInsts(oop);
-    pushLocation(oop);
+    syncAll(oop);
 }
 
 void ImageViewer::onGoBack()
@@ -1209,11 +1403,7 @@ void ImageViewer::onGoBack()
     d_forwardHisto.push_back( d_backHisto.last() );
     d_backHisto.pop_back();
     const quint16 oop = d_backHisto.last();
-    showDetail(oop);
-    syncClasses(oop);
-    syncObjects(oop);
-    fillInsts(oop);
-    fillXref(oop);
+    syncAll(oop,0,false);
 
     d_pushBackLock = false;
 }
@@ -1224,23 +1414,14 @@ void ImageViewer::onGoForward()
         return;
     quint16 oop = d_forwardHisto.last();
     d_forwardHisto.pop_back();
-    showDetail(oop);
-    syncClasses(oop);
-    syncObjects(oop);
-    fillXref(oop);
-    fillInsts(oop);
-    pushLocation(oop);
+    syncAll(oop);
 }
 
 void ImageViewer::onXrefClicked(QTreeWidgetItem* item, int col)
 {
     quint16 oop = item->data(col,Qt::UserRole).toUInt();
-    showDetail(oop);
-    syncClasses(oop);
-    syncObjects(oop);
-    fillXref(oop);
-    fillInsts(oop);
-    pushLocation(oop);
+    if( oop )
+        syncAll(oop);
 }
 
 void ImageViewer::onInstsClicked(QTreeWidgetItem* item, int)
@@ -1264,12 +1445,7 @@ void ImageViewer::onInstsClicked(QTreeWidgetItem* item, int)
         connect( tv, SIGNAL(sigObject(quint16)), this, SLOT(onObject(quint16)) );
     }else
     {
-        showDetail(oop);
-        syncClasses(oop);
-        syncObjects(oop);
-        fillXref(oop);
-        fillInsts(oop);
-        pushLocation(oop);
+        syncAll(oop);
     }
 }
 
@@ -1284,13 +1460,7 @@ void ImageViewer::onGotoAddr()
     if( !ok || addr > 0xffff )
         return;
 
-    quint16 oop = addr;
-    showDetail(oop);
-    syncClasses(oop);
-    syncObjects(oop);
-    fillInsts(oop);
-    fillXref(oop);
-    pushLocation(oop);
+    syncAll(addr);
 }
 
 void ImageViewer::onFindText()
@@ -1308,6 +1478,21 @@ void ImageViewer::onFindNext()
     QTextCursor cur = d_detail->textCursor();
     cur.movePosition(QTextCursor::EndOfWord);
     d_detail->find(d_textToFind);
+}
+
+void ImageViewer::onRefsClicked(QTreeWidgetItem* item, int)
+{
+    quint16 oop = item->data(1,Qt::UserRole).toUInt();
+    if( oop )
+        syncAll(oop);
+}
+
+void ImageViewer::onProcess(int i)
+{
+    const quint16 proc = d_procs->itemData(i).toUInt();
+    const quint16 context = d_om->fetchPointerOfObject(1, proc );
+    fillStack(context);
+    syncAll(proc);
 }
 
 ObjectTree::ObjectTree(QWidget* p)
@@ -1332,13 +1517,14 @@ void ObjectTree::onClicked(const QModelIndex& index)
     emit sigObject(oop);
 }
 
+#ifndef ST_IMG_VIEWER_EMBEDDED
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Image Viewer");
-    a.setApplicationVersion("0.7.3");
+    a.setApplicationVersion("0.8");
     a.setStyle("Fusion");
 
     ImageViewer w;
@@ -1355,4 +1541,5 @@ int main(int argc, char *argv[])
     }
     return a.exec();
 }
+#endif
 

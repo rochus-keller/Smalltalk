@@ -26,17 +26,21 @@ TEMPLATE = app
 
 INCLUDEPATH += ..
 
+DEFINES += ST_IMG_VIEWER_EMBEDDED
+
 SOURCES +=\
     StInterpreter.cpp \
     StObjectMemory2.cpp \
     StVirtualMachine.cpp \
-    StDisplay.cpp
+    StDisplay.cpp \
+    StImageViewer.cpp
 
 HEADERS  += \
     StInterpreter.h \
     StObjectMemory2.h \
     StVirtualMachine.h \
-    StDisplay.h
+    StDisplay.h \
+    StImageViewer.h
 
 
 CONFIG(debug, debug|release) {

@@ -33,6 +33,7 @@ using namespace St;
 
 static Display* s_inst = 0;
 bool Display::s_run = true;
+bool Display::s_break = false;
 static const int s_msPerFrame = 30; // 20ms according to BB
 enum { whitePixel = 1, blackPixel = 0 };
 static QFile s_out("st.log");
@@ -65,6 +66,7 @@ Display::Display(QWidget *parent) : QWidget(parent),d_curX(-1),d_curY(-1),d_caps
     new QShortcut(tr("ALT+R"), this, SLOT(onRecord()) );
     new QShortcut(tr("ALT+X"), this, SLOT(onExit()) );
     new QShortcut(tr("ALT+L"), this, SLOT(onLog()) );
+    new QShortcut(tr("ALT+B"), this, SLOT(onBreak()) );
 
     s_oldHandler = qInstallMessageHandler(messageHander);
 }
@@ -181,6 +183,14 @@ void Display::onLog()
         qWarning() << "logging on";
     }else
         qCritical() << "ERROR: cannot open log for writing";
+}
+
+void Display::onBreak()
+{
+    if( s_break )
+        return;
+    s_break = true;
+    qWarning() << "break started";
 }
 
 void Display::paintEvent(QPaintEvent* event)
@@ -525,7 +535,7 @@ bool Display::keyEvent(int keyCode, char ch, bool down)
             if( !down )
                 sendShift( false, false );
             return res;
-        }else if( ch = toAltoUpper( ch ) )
+        }else if( ( ch = toAltoUpper( ch ) ) )
         {
             if( down )
                 sendShift( true, true );

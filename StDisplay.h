@@ -99,6 +99,7 @@ namespace St
         explicit Display(QWidget *parent = 0);
         static Display* inst();
         static bool s_run;
+        static bool s_break;
 
         void setBitmap( const Bitmap& );
         const Bitmap& getBitmap() const { return d_bitmap; }
@@ -117,6 +118,7 @@ namespace St
         void onRecord();
         void onExit();
         void onLog();
+        void onBreak();
 
     protected:
         void paintEvent(QPaintEvent *);

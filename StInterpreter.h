@@ -99,12 +99,13 @@ namespace St
         Interpreter(QObject* p = 0);
         void setOm( ObjectMemory2* om );
         void interpret();
-        void cycle();
     protected slots:
         void onEvent();
         void onTimeout();
+        void onBreak();
 
     protected:
+        void cycle();
         qint16 instructionPointerOfContext( OOP contextPointer );
         void storeInstructionPointerValueInContext( qint16 value, OOP contextPointer );
         qint16 stackPointerOfContext( OOP contextPointer );

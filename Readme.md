@@ -85,6 +85,8 @@ Note that you can press CTRL+left mouse button to simulate a right mouse button 
 
 All keys on the Alto keyboard (see e.g. https://www.extremetech.com/wp-content/uploads/2011/10/Alto_Mouse_c.jpg) besides LF are supported; just type the key combination for the expected symbol on your local keyboard. Use the left and up arrow keys to enter a left and up arrow character.
 
+The VM supports some debugging features. If you press ALT+B the interpreter breaks and the Image Viewer is shown with the current state of the object memory and the interpreter registers. The currently active process is automatically selected and the current call chain is shown. When the Image Viewer is open you can press F5 (or close the viewer) to continue, or press F10 to execute the next bytecode and show the Image Viewer again. There are also some other shortcuts for logging (ALT+L) and screen update recording (ALT+R), but these only work if the corresponding functions are enabled when compiling the source code (see ST_DO_TRACING and ST_DO_SCREEN_RECORDING).
+
 
 Here is a screenshot of the running VM after some interactions:
 

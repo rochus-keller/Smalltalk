@@ -95,9 +95,9 @@ bool ObjectMemory2::readFrom(QIODevice* in)
     // qDebug() << "object space" << objectSpaceLenBytes << "bytes, object table" << objectTableLenBytes << "bytes";
 
     // Object Space format:
-    // | xxxxxxxx xxxxxxxx | word size
+    // | xxxxxxxx xxxxxxxx | word length
     // | xxxxxxxx xxxxxxxx | class
-    // | payload of lenght word size - 2
+    // | payload of word lenght - 2
 
     QByteArray objectSpace = in->read( objectSpaceLenBytes );
     if( objectSpace.size() != objectSpaceLenBytes )
@@ -139,69 +139,7 @@ bool ObjectMemory2::readFrom(QIODevice* in)
         ::memcpy( slot->d_obj->d_data, objectSpace.constData() + addr + 4, byteLen ); // without header
     }
 
-    d_objects.clear();
-    d_classes.clear();
-    d_metaClasses.clear();
-    d_freeSlots.clear();
-
-    for( int i = 0; i < d_ot.d_slots.size(); i++ )
-    {
-        const OtSlot& slot = d_ot.d_slots[i];
-        if( slot.isFree() )
-        {
-            if( i != 0 )
-                d_freeSlots.enqueue(i);
-            continue;
-        }
-        const quint16 oop = i << 1;
-        Q_ASSERT( !d_objects.contains(oop) );
-        d_objects << oop;
-
-        const OOP cls = slot.getClass();
-        d_classes << cls;
-        d_classes << fetchPointerOfObject(0,cls); // superclass of cls
-        if( cls == classCompiledMethod )
-        {
-            for( int j = 0; j < literalCountOf(oop); j++ )
-            {
-                const OOP ptr = literalOfMethod(j,oop);
-                if( !isInt(ptr) && ptr != objectNil && ptr != objectTrue && ptr != objectFalse )
-                    d_xref[ptr].append(oop);
-            }
-        }else if( hasPointerMembers(oop) )
-        {
-
-            const int len = fetchWordLenghtOf(oop);
-            for( int j = 0; j < len; j++ )
-            {
-                quint16 ptr = fetchPointerOfObject(j,oop);
-                if( !isInt(ptr) && ptr != objectNil && ptr != objectTrue && ptr != objectFalse )
-                    d_xref[ptr].append(oop);
-            }
-        }
-    }
-
-    d_classes << classSmallInteger;
-
-    d_objects -= d_classes;
-
-    foreach( quint16 cls, d_classes )
-    {
-        const quint16 nameId = fetchPointerOfObject(6, cls);
-        const quint16 nameCls = fetchClassOf(nameId);
-        if( cls == nameCls && cls != classSymbol )
-            d_metaClasses << cls;
-    }
-    d_classes -= d_metaClasses;
-
-    QSet<quint16> corrections;
-    foreach( quint16 obj, d_objects )
-    {
-        if( d_metaClasses.contains(fetchClassOf(obj)) )
-            corrections.insert(obj); // obj is actually a class but was not identified because it has no instances
-    }
-    d_objects -= corrections;
-    d_classes += corrections;
+    updateRefs();
 
     return true;
 }
@@ -517,7 +455,6 @@ bool ObjectMemory2::hasObject(OOP ptr) const
 
 QByteArray ObjectMemory2::fetchClassName(OOP classPointer) const
 {
-    Q_ASSERT( classPointer != 0 );
     if( d_classes.contains(classPointer) )
     {
         const quint16 sym = fetchPointerOfObject(6, classPointer);
@@ -540,7 +477,6 @@ QByteArray ObjectMemory2::fetchClassName(OOP classPointer) const
                       "is an instance of" << fetchClassName(cls);
         return "not a class";
     }
-    Q_ASSERT( false );
     return QByteArray();
 }
 
@@ -576,13 +512,16 @@ quint8 ObjectMemory2::literalCountOf(OOP methodPointer) const
     return getLiteralByteCount( s.d_obj->d_data ) / 2;
 }
 
-ObjectMemory2::ByteString ObjectMemory2::methodBytecodes(OOP methodPointer) const
+ObjectMemory2::ByteString ObjectMemory2::methodBytecodes(OOP methodPointer, int* startPc) const
 {
     const OtSlot& s = getSlot(methodPointer);
     Q_ASSERT( s.getClass() == ObjectMemory2::classCompiledMethod );
     const quint8 literalByteCount = getLiteralByteCount( s.d_obj->d_data );
-    const quint8* bytes = s.d_obj->d_data + methHdrByteLen + literalByteCount;
-    const quint32 byteLen = s.byteLen() - ( methHdrByteLen + literalByteCount );
+    const int offset = methHdrByteLen + literalByteCount;
+    if( startPc )
+        *startPc = offset + 1;
+    const quint8* bytes = s.d_obj->d_data + offset;
+    const quint32 byteLen = s.byteLen() - offset;
     return ByteString( bytes, byteLen );
 }
 
@@ -775,6 +714,8 @@ void ObjectMemory2::collectGarbage()
     }
 #endif
 
+    d_freeSlots.clear();
+
     // mark
     foreach( quint16 reg, d_registers )
         mark(reg);
@@ -804,7 +745,6 @@ void ObjectMemory2::collectGarbage()
             s.d_obj->d_flags.set(Object::Marked, false);
     }
 
-    Q_ASSERT( count == d_freeSlots.size() );
     const int percent = count * 100 / d_ot.d_slots.size();
     if( percent < 40 )
     {
@@ -846,6 +786,74 @@ void ObjectMemory2::mark(OOP oop)
     }
 
     mark( s.getClass() );
+}
+
+void ObjectMemory2::updateRefs()
+{
+    d_xref.clear();
+    d_objects.clear();
+    d_classes.clear();
+    d_metaClasses.clear();
+    d_freeSlots.clear();
+
+    for( int i = 0; i < d_ot.d_slots.size(); i++ )
+    {
+        const OtSlot& slot = d_ot.d_slots[i];
+        if( slot.isFree() )
+        {
+            if( i != 0 )
+                d_freeSlots.enqueue(i);
+            continue;
+        }
+        const quint16 oop = i << 1;
+        Q_ASSERT( !d_objects.contains(oop) );
+        d_objects << oop;
+
+        const OOP cls = slot.getClass();
+        d_classes << cls;
+        d_classes << fetchPointerOfObject(0,cls); // superclass of cls
+        if( cls == classCompiledMethod )
+        {
+            for( int j = 0; j < literalCountOf(oop); j++ )
+            {
+                const OOP ptr = literalOfMethod(j,oop);
+                if( !isInt(ptr) && ptr != objectNil && ptr != objectTrue && ptr != objectFalse )
+                    d_xref[ptr].append(oop);
+            }
+        }else if( hasPointerMembers(oop) )
+        {
+
+            const int len = fetchWordLenghtOf(oop);
+            for( int j = 0; j < len; j++ )
+            {
+                quint16 ptr = fetchPointerOfObject(j,oop);
+                if( !isInt(ptr) && ptr != objectNil && ptr != objectTrue && ptr != objectFalse )
+                    d_xref[ptr].append(oop);
+            }
+        }
+    }
+
+    d_classes << classSmallInteger;
+
+    d_objects -= d_classes;
+
+    foreach( quint16 cls, d_classes )
+    {
+        const quint16 nameId = fetchPointerOfObject(6, cls);
+        const quint16 nameCls = fetchClassOf(nameId);
+        if( cls == nameCls && cls != classSymbol )
+            d_metaClasses << cls;
+    }
+    d_classes -= d_metaClasses;
+
+    QSet<quint16> corrections;
+    foreach( quint16 obj, d_objects )
+    {
+        if( d_metaClasses.contains(fetchClassOf(obj)) )
+            corrections.insert(obj); // obj is actually a class but was not identified because it has no instances
+    }
+    d_objects -= corrections;
+    d_classes += corrections;
 }
 
 ObjectMemory2::OtSlot* ObjectMemory2::ObjectTable::allocate(quint16 slot, quint32 numOfBytes, OOP cls, bool isPtr)
