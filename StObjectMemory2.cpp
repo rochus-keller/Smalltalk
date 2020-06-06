@@ -269,6 +269,9 @@ QByteArray ObjectMemory2::prettyValue(ObjectMemory2::OOP oop) const
         }
     case classSymbol:
         return "#" + fetchByteArray(oop);
+    case classAssociation:
+        return prettyValue( fetchPointerOfObject( 0, oop ) ) + " = " +
+                    prettyValue( fetchPointerOfObject( 1, oop ) );
     case 0:
         return "<instance" + QByteArray::number(oop,16) + "with invalid class oop>";
     }

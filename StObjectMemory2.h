@@ -84,6 +84,7 @@ namespace St
             classMethodDictionary = 0x4c,
             classLargeNegativeInteger = 0x1da0,
             classProcess = 0x7a4,
+            classAssociation = 0x84,
         };
 
         enum CompiledMethodFlags {

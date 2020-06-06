@@ -128,7 +128,7 @@ void Interpreter::interpret()
 
     // apparently the system is in ScreenController->startUp->controlLoop->controlActivity->yellowButtonActivity
     //     ->quit->saveAs:thenQuit:->snapshotAs:thenQuit:
-    // top: BlockContext->newProcess, ControllManager->activeController:
+    // top: BlockContext->newProcess, ControllManager->activeController: SystemDictionary->install
 
     while( Display::s_run ) // && cycleNr < 2000 ) // trace2 < 500 trace3 < 2000
     {
@@ -2904,7 +2904,7 @@ void Interpreter::primitiveTickWordsInto()
     OOP oop = popStack();
     const quint32 ticks = Display::inst()->getTicks();
     // qDebug() << "primitiveTickWordsInto" << ticks;
-    // NOTE: unexpected byte order, but empirically validated with primitiveSignalAtClick that it's the right one
+    // NOTE: unexpected byte order, but empirically validated with primitiveSignalAtTick that it's the right one
     memory->storeByteOfObject(3,oop, ( ticks >> 24 ) & 0xff );
     memory->storeByteOfObject(2,oop, ( ticks >> 16 ) & 0xff );
     memory->storeByteOfObject(1,oop, ( ticks >> 8 ) & 0xff );

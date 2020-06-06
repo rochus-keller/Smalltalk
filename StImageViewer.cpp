@@ -79,7 +79,10 @@ public:
 
         // empirical additions, not in the Blue Book
         d_knowns.insert(ST_OBJECT_MEMORY::classSymbol, "Symbol");
-        d_knowns.insert(0x84, "Association");
+        d_knowns.insert(ST_OBJECT_MEMORY::classMethodDictionary, "MethodDictionary");
+        d_knowns.insert(ST_OBJECT_MEMORY::classLargeNegativeInteger, "LargeNegativeIngeter");
+        d_knowns.insert(ST_OBJECT_MEMORY::classProcess, "Process");
+        d_knowns.insert(ST_OBJECT_MEMORY::classAssociation, "Association");
     }
 
     QTreeView* getParent() const
@@ -711,10 +714,15 @@ void ImageViewer::fillInsts(quint16 cls)
             else
             {
                 const quint16 cls = d_om->fetchClassOf(objs[i]);
-                Model::Slot s;
-                s.d_oop = objs[i];
-                d_mdl->setKind( &s, cls );
-                item->setText( 1, d_mdl->stringOfValue( &s ) );
+                if( cls == ObjectMemory2::classAssociation )
+                    item->setText(1, d_om->prettyValue(objs[i]));
+                else
+                {
+                    Model::Slot s;
+                    s.d_oop = objs[i];
+                    d_mdl->setKind( &s, cls );
+                    item->setText( 1, d_mdl->stringOfValue( &s ) );
+                }
             }
         }
     }
@@ -757,6 +765,7 @@ void ImageViewer::createStack()
     QWidget* pane = new QWidget(dock);
     QVBoxLayout* vbox = new QVBoxLayout(pane);
     vbox->setMargin(0);
+    vbox->setSpacing(2);
     d_procs = new QComboBox(pane);
     vbox->addWidget(d_procs);
     d_stack = new QTreeWidget(pane);
@@ -1247,6 +1256,7 @@ void ImageViewer::fillStack(quint16 activeContext)
         item->setText(0, QString::number(level++) );
 
         const quint16 sender = d_om->fetchPointerOfObject( 0, activeContext );
+        const quint16 pc = d_om->fetchPointerOfObject( 1, activeContext );
         quint16 homeContext = activeContext;
         quint16 method = d_om->fetchPointerOfObject( 3, activeContext );
         if( d_om->isIntegerObject(method) )
@@ -1267,16 +1277,27 @@ void ImageViewer::fillStack(quint16 activeContext)
 
         if( homeContext != activeContext )
         {
+            const quint16 homePc = d_om->fetchPointerOfObject(1,homeContext);
             // this is a block
-            if( homeContext != sender && sender != nil )
+            QString text1 = QString::number(activeContext,16);
+            if( pc == nil )
+                text1 += " finished";
+            else if( sender == nil )
+                text1 += " root";
+            else if( homeContext != sender && homePc == nil )
+                text1 += " closure";
+            else
+                text1 += " block";
+            item->setText(1,text1);
+
+            if( d_om->fetchPointerOfObject(0,homeContext) == nil )
             {
-                item->setText(1, QString("%1 Closure").arg( activeContext, 0, 16) );
+                if( homePc == nil )
+                    item->setText(2, QString("%1 finished").arg( homeContext, 0, 16) );
+                else
+                    item->setText(2, QString("%1 root").arg( homeContext, 0, 16) );
             }else
-            {
-                item->setText(1, QString("%1 Block").arg( activeContext, 0, 16) );
-            }
-            item->setText(2, QString("%1%2").arg( homeContext, 0, 16).
-                          arg( d_om->fetchPointerOfObject(0,homeContext) == nil ? " root" : "" ) );
+                item->setText(2, QString("%1").arg( homeContext, 0, 16) );
             item->setData(2, Qt::UserRole, homeContext );
         }else
         {
@@ -1524,7 +1545,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Image Viewer");
-    a.setApplicationVersion("0.8");
+    a.setApplicationVersion("0.8.1");
     a.setStyle("Fusion");
 
     ImageViewer w;
