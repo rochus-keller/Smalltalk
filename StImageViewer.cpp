@@ -37,6 +37,7 @@
 #include <QShortcut>
 #include <QInputDialog>
 #include <QComboBox>
+#include <QClipboard>
 using namespace St;
 
 class ImageViewer::Model : public QAbstractItemModel
@@ -511,9 +512,10 @@ ImageViewer::ImageViewer(QWidget*p):QMainWindow(p),d_pushBackLock(false),d_nextS
     new QShortcut(tr("CTRL+G"),this,SLOT(onGotoAddr()));
     new QShortcut( tr("CTRL+F"), this, SLOT(onFindText()));
     new QShortcut( tr("F3"), this, SLOT(onFindNext()));
+    new QShortcut( tr("CTRL+SHIFT+C"), this, SLOT(onCopyTree()) );
 }
 
-bool ImageViewer::parse(const QString& path)
+bool ImageViewer::parse(const QString& path, bool collect)
 {
     QFile in(path);
     if( !in.open(QIODevice::ReadOnly) )
@@ -523,7 +525,11 @@ bool ImageViewer::parse(const QString& path)
         QMessageBox::critical(this,tr("Loading Smalltalk-80 Image"), tr("Incompatible format.") );
     else
     {
-        //d_om->collectGarbage();
+        if( collect )
+        {
+            d_om->collectGarbage();
+            qDebug() << "collected garbage";
+        }
         d_mdl->setOm(d_om);
     }
     d_backHisto.clear();
@@ -647,6 +653,7 @@ void ImageViewer::createXref()
     addDockWidget( Qt::RightDockWidgetArea, dock );
     connect( d_xrefTitle, SIGNAL(linkActivated(QString)), this, SLOT(onLink(QString)) );
     connect( d_xref, SIGNAL(itemClicked(QTreeWidgetItem*,int)), this, SLOT(onXrefClicked(QTreeWidgetItem*,int)) );
+    connect( d_xref, SIGNAL(itemDoubleClicked(QTreeWidgetItem*,int)), this, SLOT(onXrefDblClicked(QTreeWidgetItem*,int)) );
 }
 
 void ImageViewer::fillXref(quint16 oop)
@@ -692,6 +699,7 @@ void ImageViewer::createInsts()
     addDockWidget( Qt::RightDockWidgetArea, dock );
     connect( d_instsTitle, SIGNAL(linkActivated(QString)), this, SLOT(onLink(QString)) );
     connect( d_insts, SIGNAL(itemClicked(QTreeWidgetItem*,int)), this, SLOT(onInstsClicked(QTreeWidgetItem*,int)) );
+    connect( d_insts, SIGNAL(itemDoubleClicked(QTreeWidgetItem*,int)), this, SLOT(onInstsDblClicked(QTreeWidgetItem*,int)) );
 }
 
 void ImageViewer::fillInsts(quint16 cls)
@@ -775,7 +783,7 @@ void ImageViewer::createStack()
     vbox->addWidget(d_stack);
     dock->setWidget(pane);
     addDockWidget( Qt::RightDockWidgetArea, dock );
-    connect( d_stack, SIGNAL(itemClicked(QTreeWidgetItem*,int)), this, SLOT(onXrefClicked(QTreeWidgetItem*,int)) );
+    connect( d_stack, SIGNAL(itemClicked(QTreeWidgetItem*,int)), this, SLOT(onStackClicked(QTreeWidgetItem*,int)) );
     connect( d_procs, SIGNAL(activated(int)), this, SLOT(onProcess(int)));
 }
 
@@ -1225,7 +1233,7 @@ void ImageViewer::fillRegs(const Registers& regs)
 
     r->resizeColumnToContents(0);
 
-    connect( r, SIGNAL(itemClicked(QTreeWidgetItem*,int)), this, SLOT(onRefsClicked(QTreeWidgetItem*,int)) );
+    connect( r, SIGNAL(itemClicked(QTreeWidgetItem*,int)), this, SLOT(onRegsClicked(QTreeWidgetItem*,int)) );
 }
 
 void ImageViewer::syncAll(quint16 oop, QObject* cause, bool push)
@@ -1235,8 +1243,10 @@ void ImageViewer::syncAll(quint16 oop, QObject* cause, bool push)
         syncClasses(oop);
     if( cause != d_tree )
         syncObjects(oop);
-    fillInsts(oop);
-    fillXref(oop);
+    if( cause != d_insts )
+        fillInsts(oop);
+    if( cause != d_xref )
+        fillXref(oop);
     if( push )
         pushLocation(oop);
 }
@@ -1441,8 +1451,12 @@ void ImageViewer::onGoForward()
 void ImageViewer::onXrefClicked(QTreeWidgetItem* item, int col)
 {
     quint16 oop = item->data(col,Qt::UserRole).toUInt();
-    if( oop )
+    if( oop == 0 )
+        return;
+    if( QApplication::keyboardModifiers() == Qt::ShiftModifier )
         syncAll(oop);
+    else
+        syncAll(oop, d_xref);
 }
 
 void ImageViewer::onInstsClicked(QTreeWidgetItem* item, int)
@@ -1464,10 +1478,22 @@ void ImageViewer::onInstsClicked(QTreeWidgetItem* item, int)
         dock->setWidget(tv);
         addDockWidget( Qt::RightDockWidgetArea, dock );
         connect( tv, SIGNAL(sigObject(quint16)), this, SLOT(onObject(quint16)) );
-    }else
-    {
+    }else if( QApplication::keyboardModifiers() == Qt::ShiftModifier )
         syncAll(oop);
-    }
+    else
+        syncAll(oop, d_insts );
+}
+
+void ImageViewer::onXrefDblClicked(QTreeWidgetItem* item, int col)
+{
+    quint16 oop = item->data(col,Qt::UserRole).toUInt();
+    if( oop != 0 )
+        syncAll(oop);
+}
+
+void ImageViewer::onInstsDblClicked(QTreeWidgetItem* item, int)
+{
+    syncAll(item->data(0,Qt::UserRole).toUInt());
 }
 
 void ImageViewer::onGotoAddr()
@@ -1501,10 +1527,17 @@ void ImageViewer::onFindNext()
     d_detail->find(d_textToFind);
 }
 
-void ImageViewer::onRefsClicked(QTreeWidgetItem* item, int)
+void ImageViewer::onRegsClicked(QTreeWidgetItem* item, int)
 {
     quint16 oop = item->data(1,Qt::UserRole).toUInt();
     if( oop )
+        syncAll(oop);
+}
+
+void ImageViewer::onStackClicked(QTreeWidgetItem* item, int col)
+{
+    quint16 oop = item->data(col,Qt::UserRole).toUInt();
+    if( oop != 0 )
         syncAll(oop);
 }
 
@@ -1514,6 +1547,28 @@ void ImageViewer::onProcess(int i)
     const quint16 context = d_om->fetchPointerOfObject(1, proc );
     fillStack(context);
     syncAll(proc);
+}
+
+void ImageViewer::onCopyTree()
+{
+    QTreeWidget* tw = dynamic_cast<QTreeWidget*>( focusWidget() );
+    if( tw == 0 )
+        return;
+
+    QString str;
+    QTextStream out(&str);
+    for( int row = 0; row < tw->topLevelItemCount(); row++ )
+    {
+        QTreeWidgetItem* i = tw->topLevelItem(row);
+        for( int col = 0; col < tw->columnCount(); col ++ )
+        {
+            if( col != 0 )
+                out << "\t";
+            out << i->text(col);
+        }
+        out << "\n";
+    }
+    QApplication::clipboard()->setText(str);
 }
 
 ObjectTree::ObjectTree(QWidget* p)
@@ -1545,13 +1600,13 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Image Viewer");
-    a.setApplicationVersion("0.8.1");
+    a.setApplicationVersion("0.8.2");
     a.setStyle("Fusion");
 
     ImageViewer w;
 
     if( a.arguments().size() > 1 )
-        w.parse( a.arguments()[1] );
+        w.parse( a.arguments()[1], a.arguments().size() > 2 );
     else
     {
         const QString path = QFileDialog::getOpenFileName(&w,ImageViewer::tr("Open Smalltalk-80 Image File"),

@@ -41,7 +41,7 @@ namespace St
         Q_OBJECT
     public:
         ImageViewer(QWidget* = 0);
-        bool parse( const QString& path );
+        bool parse( const QString& path, bool collect = false );
         typedef QMap<QByteArray,quint16> Registers;
         void show(ST_OBJECT_MEMORY*, const Registers&);
         bool isNextStep() const { return d_nextStep; }
@@ -88,11 +88,15 @@ namespace St
         void onGoForward();
         void onXrefClicked(QTreeWidgetItem*,int);
         void onInstsClicked(QTreeWidgetItem*,int);
+        void onXrefDblClicked(QTreeWidgetItem*,int);
+        void onInstsDblClicked(QTreeWidgetItem*,int);
         void onGotoAddr();
         void onFindText();
         void onFindNext();
-        void onRefsClicked(QTreeWidgetItem*,int);
+        void onRegsClicked(QTreeWidgetItem*,int);
+        void onStackClicked(QTreeWidgetItem*,int);
         void onProcess(int);
+        void onCopyTree();
     private:
         friend class ObjectTree;
         ST_OBJECT_MEMORY* d_om;
