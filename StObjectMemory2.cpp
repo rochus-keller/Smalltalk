@@ -658,8 +658,14 @@ int ObjectMemory2::largeIntegerValueOf(OOP integerPointer) const
         value += fetchByteOfObject(2, integerPointer) * 65536;
     }else if( len == 4 )
     {
-        // TODO
-        value = 99999999;
+        // happens in Delay preSnapshot postSnapshot millisecondClockValue
+        // see Time millisecondClockInto and primitive99 for format description
+        // Milliseconds 1.1.1901 to 9.6.2020: 3'769'154'954
+        // e.g. ac9fbf66 = 1723834284L 1'723'834'284
+        value = fetchByteOfObject(0, integerPointer) +
+                ( fetchByteOfObject(1, integerPointer) << 8 ) +
+                ( fetchByteOfObject(2, integerPointer) << 16 ) +
+                ( fetchByteOfObject(3, integerPointer) << 24 );
     }else if( len == 1 )
     {
         // TODO
@@ -667,7 +673,11 @@ int ObjectMemory2::largeIntegerValueOf(OOP integerPointer) const
     }else if( len == 0 )
         value = 0; // this obviously can happen
     else
+    {
+        qWarning() << "WARNING: large integer with" << len << "bytes not supported";
         Q_ASSERT( false );
+        value = 0xffffffff;
+    }
     return value;
 }
 

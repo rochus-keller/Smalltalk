@@ -106,6 +106,7 @@ namespace St
 
     protected:
         void cycle();
+        void BREAK(bool immediate = true);
         qint16 instructionPointerOfContext( OOP contextPointer );
         void storeInstructionPointerValueInContext( qint16 value, OOP contextPointer );
         qint16 stackPointerOfContext( OOP contextPointer );
@@ -310,6 +311,7 @@ namespace St
         void primitiveTimeWordsInto();
         void primitiveTickWordsInto();
         void primitiveSignalAtTick();
+        void primitiveAltoFile();
         static inline quint16 extractBits( quint8 from, quint8 to, quint16 of )
         {
             Q_ASSERT( from <= to && to <= 15 );

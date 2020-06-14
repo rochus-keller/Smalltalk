@@ -399,6 +399,14 @@ void Interpreter::cycle()
     dispatchOnThisBytecode();
 }
 
+void Interpreter::BREAK(bool immediate)
+{
+    if( immediate )
+        onBreak();
+    else
+        Display::s_break = true;
+}
+
 void Interpreter::onEvent()
 {
     OOP sema = memory->getRegister(InputSemaphore);
@@ -1295,7 +1303,7 @@ void Interpreter::primitiveDivide()
     const qint16 integerArgument = popInteger();
     const qint16 integerReceiver = popInteger();
     successUpdate( integerArgument != 0 );
-    successUpdate( integerReceiver % integerArgument == 0 );
+    successUpdate( integerArgument != 0 && integerReceiver % integerArgument == 0 );
     qint16 integerResult = 0;
     if( success )
     {
@@ -1752,8 +1760,16 @@ void Interpreter::dispatchSystemPrimitives()
 void Interpreter::dispatchPrivatePrimitives()
 {
     ST_TRACE_PRIMITIVE("");
-    qWarning() << "WARNING: dispatchPrivatePrimitives not yet implemented";
-    primitiveFail();
+    switch( primitiveIndex )
+    {
+    case 128:
+        primitiveAltoFile();
+        break;
+    default:
+        qWarning() << "WARNING: private primitive" << primitiveIndex << "not yet implemented";
+        primitiveFail();
+        break;
+    }
 }
 
 void Interpreter::dispatchIntegerPrimitives()
@@ -2269,7 +2285,11 @@ void Interpreter::primitiveNew()
         if( isPointers(cls) )
             push( memory->instantiateClassWithPointers(cls,size) );
         else
+        {
+            // qWarning() << "primitiveNew word" << memory->fetchClassName(cls).constData() << size;
+            // never called
             push( memory->instantiateClassWithWords(cls,size) );
+        }
     }else
         unPop(1);
 }
@@ -2286,9 +2306,16 @@ void Interpreter::primitiveNewWithArg()
         if( isPointers(cls) )
             push( memory->instantiateClassWithPointers(cls,size) );
         else if( isWords(cls) )
+        {
+            // qWarning() << "primitiveNewWithArg word" << memory->fetchClassName(cls).constData() << size;
+            // WordArray, DisplayBitmap
             push( memory->instantiateClassWithWords(cls,size) );
-        else
+        }else
+        {
+            // qWarning() << "primitiveNewWithArg bytes" << memory->fetchClassName(cls).constData() << size;
+            // LargePositiveInteger (0,1,2 or 3 bytes observed), String
             push( memory->instantiateClassWithBytes(cls,size) );
+        }
     }else
         unPop(2);
 }
@@ -2793,16 +2820,16 @@ void Interpreter::primitiveStringReplace()
 
 void Interpreter::dumpStack_(const char* title)
 {
-    qDebug() << "**********" << title << "argcount" << argumentCount << "begin stack:";
+    qWarning() << "**********" << title << "argcount" << argumentCount << "begin stack:";
 #if 0
     for( int i = 0; i < argumentCount; i++ )
-        qDebug() << i << memory->prettyValue( stackValue(argumentCount- (i+1) ) );
+        qWarning() << i << memory->prettyValue( stackValue(argumentCount- (i+1) ) );
 #else
     for( int i = stackPointer; i > TempFrameStart; i-- )
-        qDebug() << i << memory->prettyValue(
+        qWarning() << i << memory->prettyValue(
                         memory->fetchPointerOfObject( i, memory->getRegister(ActiveContext) ) ).constData();
 #endif
-    qDebug() << "***** end stack";
+    qWarning() << "***** end stack";
 }
 
 void Interpreter::primitiveBeCursor()
@@ -2926,6 +2953,63 @@ void Interpreter::primitiveSignalAtTick()
         d_timer.start(diff);
     else
         asynchronousSignal(toSignal);
+}
+
+void Interpreter::primitiveAltoFile()
+{
+    // primitive 128
+
+    // dumpStack_("primitiveAltoFile");
+    /********** primitiveAltoFile argcount 5 begin stack:
+    15 <a Semaphore>    semaphore:
+    14 <a ByteArray>    page: buffer
+    13 18512L           command: diskCommand -> #CCR
+    12 4096             address: diskAddress // see AltoFileDirectory>>virtualToReal: 1->4096
+    11 0                diskNumber
+    10 <a AltoFile>
+    9 <a Semaphore>
+    8 "read:"
+    7 <a AltoFilePage>
+    ***** end stack */
+
+    BREAK();
+    /* called by
+    // -1: AltoFile dskprim
+    // 0: AltoFile doCommand:page:error:
+    // 1: FilePage doCommand:error:
+    // 2: AltoFile read:
+    // 3: File readPageNumber:
+    // 4: AltoFileDirectory open
+        nSectors ← 12.
+        diskPages ← 812 * nSectors. // nTracks * nHeads * nSectors.
+        totalPages ← 2 * diskPages. // nDisks * diskPages
+        #Dirname = "SysDir."
+    // 5: AltoFileDirectory reset
+    */
+
+    /*
+    dskprim:
+        diskNumber
+        address: diskAddress
+        command: diskCommand
+        page: buffer
+        semaphore: aSemaphore
+    "Transfer a single record (page) to or from the Alto File System.  Fail if
+    integer arguments are not 16-bit positive Integers.  Fail if a disk transfer
+     is already in progress.  Fail if the buffer is not large enough or is
+    pointer containing.  Fail if the last argument is not a Semaphore.  Xerox
+    specific primitive.  See Object documentation what IsAPrimitive.
+
+    diskNumber is 0 or 1,
+    diskAddress is the starting Alto disk address (Integer),
+    diskCommand is the disk command (usually CCR, CCW, CWW)
+    (Integer), buffer is the string containing label and data,
+    aSemaphore is signalled when the transfer completes.
+    If disk primitive encounters an error, the receiver's instance variable
+    named error is set to the DCB status.  This Integer is greater than 0 and is
+    interpreted by errorString:.  Normally error is set to 0."
+     */
+
 }
 
 void Interpreter::primitiveQuo()
