@@ -77,7 +77,7 @@ Here is a screenshot:
 ![Overview](http://software.rochus-keller.info/smalltalk80_image_viewer_0.5.png)
 
 
-### A Smalltalk-80 Interpreted Virtual Machine
+### A Smalltalk-80 Interpreted Virtual Machine in C++
 
 This is a bare bone Blue Book implementation to understand and run the original Smalltalk-80 Virtual Image in the interchange format provided at http://www.wolczko.com/st80/image.tar.gz. The focus is on functionality and compliance with the Blue Book, not on performance (it performs decently though) or productive work. Saving snapshots is not implemented. My goal is to gradualy migrate the virtual machine to a LuaJIT backend, if feasible. The interpreter reproduces the original Xerox trace2 and trace3 files included with http://www.wolczko.com/st80/image.tar.gz. The initial screen after startup corresponds to the screenshot shown on page 3 of the "Smalltalk 80 Virtual Image Version 2" manual. This is still work in progress though; there are some view update issues and don't be surprised by sporadic crashes.
 
@@ -93,6 +93,19 @@ Here is a screenshot of the running VM after some interactions:
 ![Screenshot](http://software.rochus-keller.info/smalltalk80_vm_0.3.3.png)
 
 I don't seem to be the only one interested in an original Blue Book Smalltalk-80 VM. Today (May 18 2020) I found this very interesting post on Reddit: https://www.reddit.com/r/smalltalk/comments/glqbrh/in_honor_of_alans_birthday_by_the_bluebook_c/ which refers to https://github.com/dbanay/Smalltalk. The initial commit was apparently on May 12, but most files have a creation date of February or March, one even of December; so obviously it was quite some work; the implementation is based on C++11 and SDL and seems to work very well (even a bit faster than this VM); I also found Blue Book fixes in Dan's code which I didn't see anywhere else (thanks, Dan!). He implemented a bunch of convenience features like copy paste with the host, and file system access/persistent snapshots, with a customized image. So if you're up to using it for productive work and don't care that you can't directly load the original Xerox virtual image, then better take a look at his implementation.
+
+### A Smalltalk-80 Interpreted Virtual Machine on LuaJIT
+
+This is a Lua translation of the C++ based VM described above. 
+
+This is work in progress; the interpreter is currently able to reproduce the original Xerox trace2 file included with http://www.wolczko.com/st80/image.tar.gz.
+
+Since the whole interpreter is written in Lua which runs on LuaJIT the approach can be seen as a "meta-tracing JIT" comparable to implementations based on RPython or Truffle.
+
+The VM integrates a Lua IDE with source-level debugger (see https://github.com/rochus-keller/LjTools#lua-parser-and-ide-features).  
+
+More to come. 
+
 
 
 ### Binary versions

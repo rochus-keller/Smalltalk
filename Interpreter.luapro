@@ -1,0 +1,12 @@
+[General]
+MainModule=@ByteArray()
+MainProc=@ByteArray(runInterpreter)
+Suffixes=.lua
+WorkingDir=
+
+[Modules]
+1\AbsPath=/home/me/Entwicklung/Modules/Smalltalk/ObjectMemory.lua
+1\RelPath=ObjectMemory.lua
+2\AbsPath=/home/me/Entwicklung/Modules/Smalltalk/Interpreter.lua
+2\RelPath=Interpreter.lua
+size=2

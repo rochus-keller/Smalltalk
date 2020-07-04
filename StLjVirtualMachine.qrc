@@ -1,0 +1,9 @@
+<RCC>
+    <qresource prefix="/">
+        <file>ObjectMemory.lua</file>
+        <file>Interpreter.lua</file>
+        <file>images/close.png</file>
+        <file>images/exclamation-circle.png</file>
+        <file>images/exclamation-red.png</file>
+    </qresource>
+</RCC>
