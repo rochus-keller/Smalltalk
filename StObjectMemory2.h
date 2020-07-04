@@ -149,6 +149,7 @@ namespace St
         OOP instantiateClassWithBytes( OOP classPointer, quint16 instanceByteSize );
         QByteArray fetchClassName( OOP classPointer ) const;
 
+        inline quint16 headerOf( OOP methodPointer ) const;
         quint8 temporaryCountOf( OOP methodPointer ) const; // including args
         CompiledMethodFlags flagValueOf( OOP methodPointer ) const;
         bool largeContextFlagOf( OOP methodPointer ) const;
@@ -307,6 +308,11 @@ namespace St
         const quint32 off = fieldIndex * 2;
         Q_ASSERT( fieldIndex < s.d_size );
         writeU16( s.d_obj->d_data, off, withValue );
+    }
+
+    quint16 ObjectMemory2::headerOf(ObjectMemory2::OOP methodPointer) const
+    {
+        return fetchPointerOfObject(0,methodPointer); // HeaderIndex
     }
 
 }

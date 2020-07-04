@@ -27,6 +27,35 @@
 
 namespace St
 {
+#ifdef ST_DISPLAY_WORDARRY
+class Bitmap
+{
+public:
+    Bitmap():d_buf(0),d_wordLen(0) {}
+    Bitmap( quint16* array, quint16 wordLen, quint16 pixWidth, quint16 pixHeight );
+    QImage toImage() const;
+    quint16 width() const { return d_pixWidth; }
+    quint16 height() const { return d_pixHeight; }
+    quint16 wordLen() const { return d_wordLen; }
+    bool isNull() const { return d_buf == 0; }
+    bool isSameBuffer( const Bitmap& rhs ) const { return rhs.d_buf == d_buf; }
+    inline quint16 wordAt(quint16 i) const
+    {
+        i--; // Smalltalk array indexes start with 1
+        Q_ASSERT( i < d_wordLen );
+        return d_buf[i];
+    }
+    void wordAtPut( quint16 i, quint16 v )
+    {
+        i--; // Smalltalk array indexes start with 1
+        Q_ASSERT( i < d_wordLen );
+        d_buf[i] = v;
+    }
+private:
+    quint16 d_pixWidth, d_pixHeight, d_wordLen;
+    quint16* d_buf;
+};
+#else
     class Bitmap
     {
     public:
@@ -81,6 +110,7 @@ namespace St
         quint16 d_pixWidth, d_pixHeight, d_pixLineWidth, d_wordLen;
         quint8* d_buf;
     };
+#endif
 
     class Display : public QWidget
     {
@@ -97,7 +127,9 @@ namespace St
         enum { MaxPos = 0xfff }; // 12 bits
 
         explicit Display(QWidget *parent = 0);
+        ~Display();
         static Display* inst();
+        static void forceClose();
         static bool s_run;
         static bool s_break;
 
@@ -145,7 +177,7 @@ namespace St
         quint32 d_lastEvent; // number of milliseconds since last event was posted to queue
         QElapsedTimer d_timer;
         QImage d_record;
-        bool d_shiftDown, d_capsLockDown, d_recOn;
+        bool d_shiftDown, d_capsLockDown, d_recOn, d_forceClose;
     };
 
     class BitBlt

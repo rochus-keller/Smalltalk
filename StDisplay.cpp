@@ -53,7 +53,7 @@ void messageHander(QtMsgType type, const QMessageLogContext& ctx, const QString&
 }
 
 Display::Display(QWidget *parent) : QWidget(parent),d_curX(-1),d_curY(-1),d_capsLockDown(false),
-    d_shiftDown(false),d_recOn(false)
+    d_shiftDown(false),d_recOn(false),d_forceClose(false)
 {
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
@@ -63,19 +63,38 @@ Display::Display(QWidget *parent) : QWidget(parent),d_curX(-1),d_curY(-1),d_caps
     d_lastEvent = 0;
     d_timer.start();
     // startTimer(s_msPerFrame);
+#ifndef ST_DISPLAY_WORDARRY
     new QShortcut(tr("ALT+R"), this, SLOT(onRecord()) );
     new QShortcut(tr("ALT+X"), this, SLOT(onExit()) );
     new QShortcut(tr("ALT+L"), this, SLOT(onLog()) );
     new QShortcut(tr("ALT+B"), this, SLOT(onBreak()) );
 
     s_oldHandler = qInstallMessageHandler(messageHander);
+#endif
+}
+
+Display::~Display()
+{
+    s_inst = 0;
 }
 
 Display*Display::inst()
 {
     if( s_inst == 0 )
+    {
         s_inst = new Display();
+        s_run = true;
+    }
     return s_inst;
+}
+
+void Display::forceClose()
+{
+    if( s_inst )
+    {
+        s_inst->d_forceClose = true;
+        s_inst->close();
+    }
 }
 
 void Display::setBitmap(const Bitmap& buf)
@@ -119,6 +138,7 @@ void Display::drawRecord(int x, int y, int w, int h)
 
 void Display::updateArea(const QRect& r )
 {
+#ifndef ST_DISPLAY_WORDARRY
     const int w = r.width();
     const int h = r.height();
     if( w > d_bitmap.width() / 2 && h > d_bitmap.height() / 2 )
@@ -146,7 +166,10 @@ void Display::updateArea(const QRect& r )
                 d_screen.setPixel(_x+x,_y+y, d_bitmap.test(_x+x,_y+y) ? blackPixel : whitePixel );
         }
     }
-
+#else
+    // TODO
+    d_screen = d_bitmap.toImage();
+#endif
 
     update( r );
 }
@@ -237,6 +260,12 @@ void Display::timerEvent(QTimerEvent*)
 
 void Display::closeEvent(QCloseEvent* event)
 {
+    if( d_forceClose || !s_run )
+    {
+        event->accept();
+        deleteLater();
+        return;
+    }
     event->ignore();
     const int res = QMessageBox::warning(this, renderTitle(), tr("Do you really want to close the VM? Changes are lost!"),
                                          QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Cancel );
@@ -556,6 +585,7 @@ void Display::sendShift(bool keyPress, bool shiftRequired)
         postEvent( !keyPress ? BiStateOn : BiStateOff, 136 );
 }
 
+#ifndef ST_DISPLAY_WORDARRY
 Bitmap::Bitmap(quint8* buf, quint16 wordLen, quint16 pixWidth, quint16 pixHeight)
 {
     d_buf = buf;
@@ -614,6 +644,37 @@ QImage Bitmap::toImage(quint16 x, quint16 y, quint16 w, quint16 h) const
     }
     return img;
 }
+#else
+Bitmap::Bitmap(quint16* array, quint16 wordLen, quint16 pixWidth, quint16 pixHeight)
+{
+    d_buf = array;
+    d_wordLen = wordLen;
+    d_pixWidth = pixWidth;
+    d_pixHeight = pixHeight;
+    Q_ASSERT( ( ( d_pixWidth + 15 ) / 16 ) * d_pixHeight == d_wordLen );
+}
+
+QImage Bitmap::toImage() const
+{
+    if( isNull() )
+        return QImage();
+    QImage img( d_pixWidth, d_pixHeight, QImage::Format_Mono );
+    const int maxw = ( d_pixWidth + 15 ) / 16;
+    for( int y = 0; y < d_pixHeight; y++ )
+    {
+        uchar* dest = img.scanLine(y);
+        quint16* line = d_buf + y * maxw;
+        for( int x = 0; x < maxw; x++ )
+        {
+            const quint16 src = ~line[0];
+            int bx = x << 1;
+            dest[bx] = src >> 8;
+            dest[bx+1] = src & 0xff;
+        }
+    }
+    return img;
+}
+#endif
 
 BitBlt::BitBlt(const Input& in):
     sourceBits( in.sourceBits ),
@@ -879,3 +940,5 @@ const QList<qint16> BitBlt::RightMasks = QList<qint16>() <<
        0x1fff << 0x3fff << 0x7fff << 0xffff;
 
 const qint16 BitBlt::AllOnes = 0xffff;
+
+

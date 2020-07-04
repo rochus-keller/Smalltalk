@@ -60,8 +60,14 @@ static inline void writeU16( QByteArray& data, int off, quint16 val )
     data[off+1] = val & 0xff;
 }
 
+static inline quint16 extractBits( quint8 from, quint8 to, quint16 of )
+{
+    Q_ASSERT( from <= to && to <= 15 );
+    return ( of >> ( 15 - to ) ) & ( ( 1 << ( to - from + 1 ) ) - 1 );
+}
+
 static const int methHdrByteLen = 2;
-static const int ValueIndex = methHdrByteLen / 2;
+static const int ValueIndex = 1;
 
 static inline quint8 getLiteralByteCount( const quint8* space )
 {
@@ -486,9 +492,14 @@ QByteArray ObjectMemory2::fetchClassName(OOP classPointer) const
 quint8 ObjectMemory2::temporaryCountOf(OOP methodPointer) const
 {
     Q_ASSERT(methodPointer);
+#if 0
     const OtSlot& s = getSlot(methodPointer);
     Q_ASSERT( s.getClass() == ObjectMemory2::classCompiledMethod );
     return s.d_obj->d_data[0] & 0x1f;
+#else
+    const OOP header = headerOf(methodPointer);
+    return extractBits(3,7,header);
+#endif
 }
 
 ObjectMemory2::CompiledMethodFlags ObjectMemory2::flagValueOf(OOP methodPointer) const
@@ -502,17 +513,27 @@ ObjectMemory2::CompiledMethodFlags ObjectMemory2::flagValueOf(OOP methodPointer)
 bool ObjectMemory2::largeContextFlagOf(OOP methodPointer) const
 {
     Q_ASSERT(methodPointer);
+#if 0
     const OtSlot& s = getSlot(methodPointer);
     Q_ASSERT( s.getClass() == ObjectMemory2::classCompiledMethod );
     return ( s.d_obj->d_data[1] & 0x80 );
+#else
+    const OOP header = headerOf(methodPointer);
+    return extractBits(8,8,header);
+#endif
 }
 
 quint8 ObjectMemory2::literalCountOf(OOP methodPointer) const
 {
     Q_ASSERT(methodPointer);
+#if 0
     const OtSlot& s = getSlot(methodPointer);
     Q_ASSERT( s.getClass() == ObjectMemory2::classCompiledMethod );
     return getLiteralByteCount( s.d_obj->d_data ) / 2;
+#else
+    const OOP header = headerOf(methodPointer);
+    return extractBits(9,14,header);
+#endif
 }
 
 ObjectMemory2::ByteString ObjectMemory2::methodBytecodes(OOP methodPointer, int* startPc) const
