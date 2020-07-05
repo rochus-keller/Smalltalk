@@ -143,6 +143,7 @@ private:
         void drawRecord( int x, int y, int w, int h );
         bool isRecOn() const { return d_recOn; }
         void updateArea(const QRect& r);
+        void setLog(bool on);
     signals:
         void sigEventQueue();
 

@@ -166,8 +166,8 @@ namespace St
         bool doubleExtendedSuperBytecode();
         bool sendSpecialSelectorBytecode();
         bool sendLiteralSelectorBytecode();
-        void jump( quint32 offset);
-        void jumpif( quint16 condition, quint32 offset );
+        void jump( qint32 offset);
+        void jumpif( quint16 condition, qint32 offset );
         void sendSelector( OOP selector, quint16 argumentCount );
         void sendSelectorToClass( OOP classPointer );
         void executeNewMethod();

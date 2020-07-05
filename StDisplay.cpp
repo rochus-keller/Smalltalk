@@ -174,6 +174,14 @@ void Display::updateArea(const QRect& r )
     update( r );
 }
 
+void Display::setLog(bool on)
+{
+    if( on && !s_out.isOpen() )
+        onLog();
+    else if( !on && s_out.isOpen() )
+        onLog();
+}
+
 void Display::onRecord()
 {
     if( !d_recOn )

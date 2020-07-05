@@ -318,8 +318,9 @@ local function stackBytecode()
         popStack()
     elseif b == 136 then
         -- duplicateTopBytecode()
-        ST_TRACE_BYTECODE()
-        push( stackTop() )
+        local val = stackTop()
+        ST_TRACE_BYTECODE("val:", prettyValue(val) )
+        push( val )
     elseif b == 137 then
         -- pushActiveContextBytecode()
         ST_TRACE_BYTECODE()
@@ -677,33 +678,36 @@ end
 local function sendBytecode()
 	if currentBytecode == 131 then
         -- singleExtendedSendBytecode()
-		ST_TRACE_BYTECODE()
 		local descriptor = fetchByte()
 		local selectorIndex = C.St_extractBits( 11, 15, descriptor )
 		local _argumentCount = C.St_extractBits( 8, 10, descriptor )
-		sendSelector( literal(selectorIndex), _argumentCount )
+		local selector = literal(selectorIndex)
+		ST_TRACE_BYTECODE("selector:", prettyValue(selector), "count:", _argumentCount )
+		sendSelector( selector, _argumentCount )
 	elseif currentBytecode == 132 then
         -- doubleExtendedSendBytecode()
-		ST_TRACE_BYTECODE()
 		local count = fetchByte()
 		local selector = literal( fetchByte() )
+		ST_TRACE_BYTECODE("selector:", prettyValue(selector), "count:", count )
 		sendSelector( selector, count )
 	elseif currentBytecode == 133 then
         -- singleExtendedSuperBytecode()
-		ST_TRACE_BYTECODE()
 		local descriptor = fetchByte()
 		argumentCount = C.St_extractBits( 8, 10, descriptor )
 		local selectorIndex = C.St_extractBits( 11, 15, descriptor )
 		messageSelector = literal( selectorIndex )
 		local methodClass = methodClassOf( method )
-		sendSelectorToClass( superclassOf(methodClass) )
+		local super = superclassOf(methodClass)
+		ST_TRACE_BYTECODE("selector:", prettyValue(messageSelector), "super:", prettyValue(super) )
+		sendSelectorToClass( super )
 	elseif currentBytecode == 134 then
         -- doubleExtendedSuperBytecode()
-		ST_TRACE_BYTECODE()
 		argumentCount = fetchByte()
 		messageSelector = literal( fetchByte() )
 		local methodClass = methodClassOf( method )
-		sendSelectorToClass( superclassOf(methodClass) )
+		local super = superclassOf(methodClass)
+		ST_TRACE_BYTECODE("selector:", prettyValue(messageSelector), "super:", prettyValue(super) )
+		sendSelectorToClass( super )
 	elseif currentBytecode >= 176 and currentBytecode <= 207 then
     	-- sendSpecialSelectorBytecode()
 		if not specialSelectorPrimitiveResponse()  then
@@ -893,7 +897,7 @@ local function cycle()
 	checkProcessSwitch() 
 	currentBytecode = fetchByte()
 	cycleNr = cycleNr + 1
-	-- TRAP( cycleNr==292 )
+	-- TRAP( cycleNr==1677 )
 	dispatchOnThisBytecode()
 end
 
@@ -904,7 +908,7 @@ function module.interpret()
     local firstContext = activeProcess()[1] -- SuspendedContextIndex
 	newActiveContext( firstContext )
 	print "start main loop"
-	while C.St_isRunning() ~= 0 and cycleNr < 500 do -- trace2
+	while C.St_isRunning() ~= 0 and cycleNr < 2000 do -- trace 3
 		cycle()
 		C.St_processEvents()
 	end

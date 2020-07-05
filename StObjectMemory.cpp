@@ -416,15 +416,16 @@ qint16 ObjectMemory::integerValueOf(quint16 objectPointer)
 {
     if( isInt(objectPointer) )
     {
-        int res = ( objectPointer >> 1 );
-        if( objectPointer & 0x4000 )
+        quint16 tcomp = ( objectPointer >> 1 );
+        if( tcomp & 0x4000 )
         {
-            res = -( ~res & 0x7fff ) - 1;
+            qint16 res = -( ~tcomp & 0x7fff ) - 1;
             return res;
         }else
-            return res;
-    }else
-        return 0;
+            return tcomp;
+    }
+    // else
+    return 0;
 }
 
 static inline QByteArray printData( quint16 cls, const QByteArray& data, bool isPtr )
