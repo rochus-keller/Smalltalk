@@ -674,8 +674,8 @@ QImage Bitmap::toImage() const
         quint16* line = d_buf + y * maxw;
         for( int x = 0; x < maxw; x++ )
         {
-            const quint16 src = ~line[0];
-            int bx = x << 1;
+            const quint16 src = ~line[x];
+            const int bx = x << 1;
             dest[bx] = src >> 8;
             dest[bx+1] = src & 0xff;
         }

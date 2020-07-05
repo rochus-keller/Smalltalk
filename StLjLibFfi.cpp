@@ -98,14 +98,19 @@ DllExport int St_isRunning()
     return St::Display::s_run;
 }
 
+static quint32 s_startTime = 0;
+
 DllExport void St_stop()
 {
     St::Display::s_run = false;
+    const quint32 stopTime = St::Display::inst()->getTicks();
+    qWarning() << "runtime [ms]:" << ( stopTime - s_startTime );
 }
 
 DllExport void St_start()
 {
     St::Display::s_run = true;
+    s_startTime = St::Display::inst()->getTicks();
 }
 
 DllExport void St_processEvents()
@@ -240,6 +245,12 @@ DllExport void St_bitBlt( WordArray* destBits, int destW, int destH,
     if( !htBm.isNull() )
         in.halftoneBits = &htBm;
 
+#if 0
+    QVector<quint16> before(destBits->count);
+    for( int i = 0; i < destBits->count; i++ )
+        before[i] = destBits->data[i];
+#endif
+
     in.combinationRule = combinationRule;
     in.destX = destX;
     in.destY = destY;
@@ -255,14 +266,31 @@ DllExport void St_bitBlt( WordArray* destBits, int destW, int destH,
     St::BitBlt bb( in );
     bb.copyBits();
 
+#if 0
+    bool same = true;
+    for( int i = 0; i < destBits->count; i++ )
+    {
+        if( before[i] != destBits->data[i] )
+        {
+            same = false;
+            break;
+        }
+    }
+#endif
+
     if( drawToDisp )
     {
         const QRect dest(in.destX, in.destY, in.width, in.height);
         const QRect clip( in.clipX, in.clipY, in.clipWidth, in.clipHeight );
         disp->updateArea( dest & clip );
     }
-    //static int count = 0;
-    //destBm.toImage().save(QString("bitblt_%1.png").arg(++count,4, 10, QChar('0')));
+#if 0
+    static int count = 0;
+    destBm.toImage().save(QString("screens/bitblt_%1.png").arg(++count,4, 10, QChar('0')));
+    // there are indeed changes
+    if( drawToDisp && same )
+        qDebug() << "copyBits didn't change anything in" << count;
+#endif
 }
 
 }

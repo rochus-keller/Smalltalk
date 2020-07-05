@@ -139,18 +139,25 @@ local function prettyValue( value )
 	elseif cls == classFloat then
 		return tostring(value[0]) .. "F"
 	elseif cls == classCharacter then
-		local ch = string.char(value[0])
-		if ch then
-			return "'" .. ch .. "'"
+		local ch = value[0]
+		if ch > 0x20 and ch < 0x7f then
+			return "'" .. string.char(ch) .. "'"
 		else
-			return "0x" .. string.format("%x",value[0])
+			return "0x" .. string.format("%x",ch)
 		end
 	elseif cls == knowns[0x38] then -- Symbol
 		return 	"#" .. ffi.string(C.St_toString( value.data ))
 	elseif cls == knowns[0x1a] then -- Point
 		return prettyValue(value[0]) .. "@" .. prettyValue(value[1])
 	elseif cls == knowns[0x0e] then -- String
-		return 	"\"" .. ffi.string(C.St_toString( value.data )) .. "\""
+		local str = ffi.string(C.St_toString( value.data ))
+		local len = string.len(str)
+		local suff = ""
+		if len > 32 then
+			suff = ".."
+		end
+		str = string.gsub(string.sub(str,1,32), "%s+", " ")
+		return 	"\"" .. str .. "\"" .. suff
 	elseif cls.oop == 0x84 then -- Association
 		return prettyValue(value[0]) .. " = " .. prettyValue(value[1])
 	else
@@ -166,7 +173,7 @@ end
 
 local function ST_TRACE_BYTECODE(...)
 	-- TODO: comment out all TRACE calls when no longer needed!
-	TRACE( string.format("Bytecode <%d>\t[%d]", currentBytecode, cycleNr ), ... ) 
+	--TRACE( string.format("Bytecode <%d>\t[%d]", currentBytecode, cycleNr ), ... ) 
 end
 
 local function ST_TRACE_METHOD_CALL(...)
@@ -885,9 +892,10 @@ local function checkProcessSwitch()
         newProcessWaiting = false
         local activeProcess_ = activeProcess()
         if activeProcess_ then
-            activeProcess_[1] = activeProcess_ -- SuspendedContextIndex
+            activeProcess_[1] = activeContext -- SuspendedContextIndex
         end
-        schedulerPointer()[1] = newProcess -- ActiveProcessIndex
+        local scheduler = schedulerPointer()
+        scheduler[1] = newProcess -- ActiveProcessIndex
         newActiveContext( newProcess[1] ) -- SuspendedContextIndex
         newProcess = nil
     end
@@ -908,10 +916,11 @@ function module.interpret()
     local firstContext = activeProcess()[1] -- SuspendedContextIndex
 	newActiveContext( firstContext )
 	print "start main loop"
-	while C.St_isRunning() ~= 0 and cycleNr < 2000 do -- trace 3
+	while C.St_isRunning() ~= 0 and cycleNr < 121000 do 
 		cycle()
 		C.St_processEvents()
 	end
+	C.St_stop()
 	print "quit main loop"
 end
 

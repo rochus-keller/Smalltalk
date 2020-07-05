@@ -98,7 +98,7 @@ I don't seem to be the only one interested in an original Blue Book Smalltalk-80
 
 This is a Lua translation of the C++ based VM described above. 
 
-This is work in progress; the interpreter is currently able to reproduce the original Xerox trace2 file included with http://www.wolczko.com/st80/image.tar.gz.
+This is work in progress; the interpreter reproduces the original Xerox trace2 and trace3 files included with http://www.wolczko.com/st80/image.tar.gz; the initial screen after startup corresponds to the screenshot shown on page 3 of the "Smalltalk 80 Virtual Image Version 2" manual; even the trace log of the first 121k cycles (the time to fully display the initial screen) is identical with the one produced by the C++ implementation.
 
 Since the whole interpreter is written in Lua which runs on LuaJIT the approach can be seen as a "meta-tracing JIT" comparable to implementations based on RPython or Truffle.
 

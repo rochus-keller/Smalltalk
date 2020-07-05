@@ -124,20 +124,23 @@ void Interpreter::interpret()
 {
     cycleNr = 0;
     level = 0;
-    // Display::inst()->setLog(true); // TEST
+    const quint32 startTime = Display::inst()->getTicks();
+    //Display::inst()->setLog(true); // TEST
     newActiveContext( firstContext() ); // BB: When Smalltalk is started up, ...
 
     // apparently the system is in ScreenController->startUp->controlLoop->controlActivity->yellowButtonActivity
     //     ->quit->saveAs:thenQuit:->snapshotAs:thenQuit:
     // top: BlockContext->newProcess, ControllManager->activeController: SystemDictionary->install
 
-    while( Display::s_run ) // && cycleNr < 2000 ) // trace2 < 500 trace3 < 2000
+    while( Display::s_run ) // && cycleNr < 121000 ) // trace2 < 500 trace3 < 2000
     {
         cycle();
         qApp->processEvents();
         if( Display::s_break )
             onBreak();
     }
+    const quint32 endTime = Display::inst()->getTicks();
+    qWarning() << "runtime [ms]:" << ( endTime - startTime );
 }
 
 qint16 Interpreter::instructionPointerOfContext(Interpreter::OOP contextPointer)
@@ -473,8 +476,10 @@ void Interpreter::checkProcessSwitch()
         OOP activeProcess_ = activeProcess();
         if( activeProcess_ )
             memory->storePointerOfObject(SuspendedContextIndex, activeProcess_, memory->getRegister(ActiveContext));
-        memory->storePointerOfObject(ActiveProcessIndex, schedulerPointer(), memory->getRegister(NewProcess) );
-        newActiveContext( memory->fetchPointerOfObject( SuspendedContextIndex, memory->getRegister(NewProcess) ));
+        OOP scheduler = schedulerPointer();
+        OOP newProcess = memory->getRegister(NewProcess);
+        memory->storePointerOfObject(ActiveProcessIndex, scheduler, newProcess );
+        newActiveContext( memory->fetchPointerOfObject( SuspendedContextIndex, newProcess ));
         memory->setRegister(NewProcess, 0);
     }
 }
@@ -2814,6 +2819,8 @@ void Interpreter::primitiveCopyBits()
         const QRect clip( in.clipX, in.clipY, in.clipWidth, in.clipHeight );
         disp->updateArea( dest & clip );
     }
+//    static int count = 0;
+//    destBits.toImage().save(QString("cppscreens/bitblt_%1.png").arg(++count,4, 10, QChar('0')));
 
 #ifdef ST_DO_SCREEN_RECORDING
     if( disp->isRecOn() && drawToDisp )
