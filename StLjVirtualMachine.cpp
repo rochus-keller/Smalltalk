@@ -77,7 +77,10 @@ void LjVirtualMachine::run()
 
     lua_getglobal( d_lua->getCtx(), "runInterpreter" );
     if( !d_lua->runFunction() )
+    {
         qCritical() << d_lua->getLastError().constData();
+        QMessageBox::critical( Display::inst(), tr("Lua Error"), d_lua->getLastError() );
+    }
 }
 
 void LjVirtualMachine::onNotify(int messageType, QByteArray val1, int val2)
@@ -101,7 +104,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk-80 on LuaJIT");
-    a.setApplicationVersion("0.3");
+    a.setApplicationVersion("0.4");
     a.setStyle("Fusion");
 
     QString imagePath;

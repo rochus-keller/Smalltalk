@@ -107,10 +107,21 @@ DllExport void St_stop()
     qWarning() << "runtime [ms]:" << ( stopTime - s_startTime );
 }
 
+static int s_pendingEvents = 0;
+
+static void eventCallback()
+{
+    s_pendingEvents++;
+}
+
 DllExport void St_start()
 {
     St::Display::s_run = true;
-    s_startTime = St::Display::inst()->getTicks();
+    s_pendingEvents = 0;
+    St::Display* d = St::Display::inst();
+    s_startTime = d->getTicks();
+    d->clearEvents();
+    d->setEventCallback(eventCallback);
 }
 
 DllExport void St_processEvents()
@@ -209,10 +220,19 @@ DllExport const char* St_toString( ByteArray* ba )
     return str;
 }
 
+DllExport int St_pendingEvents()
+{
+    const int res = s_pendingEvents;
+    s_pendingEvents = 0;
+    return res;
+}
+
 DllExport void St_beDisplay( WordArray* wa, int width, int height )
 {
     St::Bitmap bmp(wa->data, wa->count, width, height );
-    St::Display::inst()->setBitmap( bmp );
+    St::Display* d = St::Display::inst();
+    d->setBitmap( bmp );
+    d->clearEvents();
 }
 
 

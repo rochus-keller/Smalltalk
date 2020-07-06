@@ -64,6 +64,7 @@ ffi.cdef[[
     void St_log( const char* msg );
     const char* St_toString( ByteArray* ba );
     int St_extractBitsSi(int from, int to, int word);
+    int St_pendingEvents();
     void St_beDisplay( WordArray* wa, int width, int height );
     void St_beCursor( WordArray* wa, int width, int height );
     void St_bitBlt( WordArray* destBits, int destW, int destH,
@@ -236,42 +237,42 @@ local function stackBytecode()
 	local b = currentBytecode
 	if b >= 0 and b <= 15 then
         -- pushReceiverVariableBytecode()
-		ST_TRACE_BYTECODE("receiver:",prettyValue(receiver))
+		-- ST_TRACE_BYTECODE("receiver:",prettyValue(receiver))
 		push( receiver[ C.St_extractBits( 12, 15, currentBytecode ) ] )
 	elseif b >= 16 and b <= 31 then
         -- pushTemporaryVariableBytecode()
 		local var = C.St_extractBits( 12, 15, currentBytecode )
 		local val = temporary( var )
-		ST_TRACE_BYTECODE("variable:", var, "value:", prettyValue(val) )
+		-- ST_TRACE_BYTECODE("variable:", var, "value:", prettyValue(val) )
 		push( val )
 	elseif b >= 32 and b <= 63 then
         -- pushLiteralConstantBytecode()
 		local fieldIndex = C.St_extractBits( 11, 15, currentBytecode )
 		local literalConstant = literal( fieldIndex )
-		ST_TRACE_BYTECODE("literal:",fieldIndex,"value:",prettyValue(literalConstant),"of method:", method.oop )
+		-- ST_TRACE_BYTECODE("literal:",fieldIndex,"value:",prettyValue(literalConstant),"of method:", method.oop )
 		push( literalConstant )
 	elseif b >= 64 and b <= 95 then
         -- pushLiteralVariableBytecode()
 		local fieldIndex = C.St_extractBits( 11, 15, currentBytecode )
 		local association = literal( fieldIndex )
 		local value = association[1] -- ValueIndex
-		ST_TRACE_BYTECODE("literal:", fieldIndex, "value:", prettyValue(value), "of method:", method.oop )
+		-- ST_TRACE_BYTECODE("literal:", fieldIndex, "value:", prettyValue(value), "of method:", method.oop )
 		push( value )
 	elseif b >= 96 and b <= 103 then
         -- storeAndPopReceiverVariableBytecode()
 		local variableIndex = C.St_extractBits( 13, 15, currentBytecode )
 		local val = popStack()
-		ST_TRACE_BYTECODE("var:", variableIndex, "val:", prettyValue(val) )
+		-- ST_TRACE_BYTECODE("var:", variableIndex, "val:", prettyValue(val) )
 		receiver[variableIndex] = val
 	elseif b >= 104 and b <= 111 then
         -- storeAndPopTemporaryVariableBytecode()
 		local variableIndex = C.St_extractBits( 13, 15, currentBytecode )
 		local val = popStack()
-		ST_TRACE_BYTECODE("var:", variableIndex, "val:", prettyValue(val) )
+		-- ST_TRACE_BYTECODE("var:", variableIndex, "val:", prettyValue(val) )
 		homeContext[variableIndex+6] = val -- +6 TempFrameStart
     elseif b == 112 then
         -- pushReceiverBytecode()
-		ST_TRACE_BYTECODE("receiver:", prettyValue(receiver)) 
+		-- ST_TRACE_BYTECODE("receiver:", prettyValue(receiver)) 
 		push( receiver )
     elseif b >= 113 and b <= 119 then
         -- pushConstantBytecode()
@@ -291,7 +292,7 @@ local function stackBytecode()
 		elseif currentBytecode == 119 then
 		    val = 2
 		end
-		ST_TRACE_BYTECODE("val:", prettyValue(val) )
+		-- ST_TRACE_BYTECODE("val:", prettyValue(val) )
 		push(val)
     elseif b == 128 then
         -- extendedPushBytecode()
@@ -308,29 +309,29 @@ local function stackBytecode()
 		elseif variableType == 3 then
 		    val = literal( variableIndex )[1] -- ValueIndex
 		end
-		ST_TRACE_BYTECODE("val:", prettyValue(val) )
+		-- ST_TRACE_BYTECODE("val:", prettyValue(val) )
 		push(val)
     elseif b == 129 then
-	    ST_TRACE_BYTECODE()
+	    -- ST_TRACE_BYTECODE()
         extendedStoreBytecode()
     elseif b == 130 then
         -- extendedStoreAndPopBytecode()
-		ST_TRACE_BYTECODE()
+		-- ST_TRACE_BYTECODE()
 		extendedStoreBytecode()	
 		-- popStackBytecode()
 		popStack()
     elseif b == 135 then
         -- popStackBytecode()
-        ST_TRACE_BYTECODE()
+        -- ST_TRACE_BYTECODE()
         popStack()
     elseif b == 136 then
         -- duplicateTopBytecode()
         local val = stackTop()
-        ST_TRACE_BYTECODE("val:", prettyValue(val) )
+        -- ST_TRACE_BYTECODE("val:", prettyValue(val) )
         push( val )
     elseif b == 137 then
         -- pushActiveContextBytecode()
-        ST_TRACE_BYTECODE()
+        -- ST_TRACE_BYTECODE()
         push( activeContext )
     end
 end
@@ -461,7 +462,7 @@ local function primitiveResponse()
     else
         success = true -- initPrimitive()
         local currentPrimitive = primitive[primitiveIndex] -- dispatchPrimitives() 
-        ST_TRACE_PRIMITIVE()
+        -- ST_TRACE_PRIMITIVE()
         if currentPrimitive then
         	currentPrimitive()
        	else
@@ -512,7 +513,7 @@ local function newActiveContext(aContext)
 end
 
 local function executeNewMethod()
-    ST_TRACE_METHOD_CALL()
+    -- ST_TRACE_METHOD_CALL()
     if not primitiveResponse() then
         -- function activateNewMethod() -- used once inlined
 		local contextSize = 6 -- TempFrameStart;
@@ -552,7 +553,7 @@ local function sendSelector(selector,count) -- called seven times
 end
 
 local function returnValue(resultPointer, contextPointer)
-	ST_TRACE_BYTECODE("result:", prettyValue(resultPointer), "context:", prettyValue(contextPointer))
+	-- ST_TRACE_BYTECODE("result:", prettyValue(resultPointer), "context:", prettyValue(contextPointer))
 
     if contextPointer == nil then
         push( activeContext )
@@ -689,13 +690,13 @@ local function sendBytecode()
 		local selectorIndex = C.St_extractBits( 11, 15, descriptor )
 		local _argumentCount = C.St_extractBits( 8, 10, descriptor )
 		local selector = literal(selectorIndex)
-		ST_TRACE_BYTECODE("selector:", prettyValue(selector), "count:", _argumentCount )
+		-- ST_TRACE_BYTECODE("selector:", prettyValue(selector), "count:", _argumentCount )
 		sendSelector( selector, _argumentCount )
 	elseif currentBytecode == 132 then
         -- doubleExtendedSendBytecode()
 		local count = fetchByte()
 		local selector = literal( fetchByte() )
-		ST_TRACE_BYTECODE("selector:", prettyValue(selector), "count:", count )
+		-- ST_TRACE_BYTECODE("selector:", prettyValue(selector), "count:", count )
 		sendSelector( selector, count )
 	elseif currentBytecode == 133 then
         -- singleExtendedSuperBytecode()
@@ -705,7 +706,7 @@ local function sendBytecode()
 		messageSelector = literal( selectorIndex )
 		local methodClass = methodClassOf( method )
 		local super = superclassOf(methodClass)
-		ST_TRACE_BYTECODE("selector:", prettyValue(messageSelector), "super:", prettyValue(super) )
+		-- ST_TRACE_BYTECODE("selector:", prettyValue(messageSelector), "super:", prettyValue(super) )
 		sendSelectorToClass( super )
 	elseif currentBytecode == 134 then
         -- doubleExtendedSuperBytecode()
@@ -713,7 +714,7 @@ local function sendBytecode()
 		messageSelector = literal( fetchByte() )
 		local methodClass = methodClassOf( method )
 		local super = superclassOf(methodClass)
-		ST_TRACE_BYTECODE("selector:", prettyValue(messageSelector), "super:", prettyValue(super) )
+		-- ST_TRACE_BYTECODE("selector:", prettyValue(messageSelector), "super:", prettyValue(super) )
 		sendSelectorToClass( super )
 	elseif currentBytecode >= 176 and currentBytecode <= 207 then
     	-- sendSpecialSelectorBytecode()
@@ -722,17 +723,17 @@ local function sendBytecode()
 			local specialSelectors = memory.knownObjects[0x30]
 			local selector = specialSelectors[selectorIndex] -- specialSelectors
 			local count = fetchIntegerOfObject(selectorIndex + 1, specialSelectors )
-			ST_TRACE_BYTECODE("selector:", prettyValue(selector), "count:", count )
+			-- ST_TRACE_BYTECODE("selector:", prettyValue(selector), "count:", count )
 			sendSelector( selector, count )
 		else
-			ST_TRACE_BYTECODE("primitive")
+			-- ST_TRACE_BYTECODE("primitive")
 		end
 	elseif currentBytecode >= 208 and currentBytecode <= 255 then
         -- sendLiteralSelectorBytecode()
 		local litNr = C.St_extractBits( 12, 15, currentBytecode )
 		local selector = literal( litNr )
 		local argumentCount = C.St_extractBits( 10, 11, currentBytecode ) - 1
-		ST_TRACE_BYTECODE("selector:", prettyValue(selector), "count:", argumentCount )
+		-- ST_TRACE_BYTECODE("selector:", prettyValue(selector), "count:", argumentCount )
 		sendSelector( selector, argumentCount )
 	end
 end
@@ -764,24 +765,24 @@ local function jumpBytecode()
     if b >= 144 and b <= 151 then
         -- shortUnconditionalJump()
 		local offset = C.St_extractBits( 13, 15, currentBytecode )
-		ST_TRACE_BYTECODE("offset:", offset + 1 )
+		-- ST_TRACE_BYTECODE("offset:", offset + 1 )
 		jump( offset + 1 )
 	elseif b >= 152 and b <= 159 then
         -- shortContidionalJump()
 		local offset = C.St_extractBits( 13, 15, currentBytecode )
-		ST_TRACE_BYTECODE("offset:", offset + 1 )
+		-- ST_TRACE_BYTECODE("offset:", offset + 1 )
 		jumpif( false, offset + 1 )
 	elseif b >= 160 and b <= 167 then
         -- longUnconditionalJump()
 		local offset = C.St_extractBits( 13, 15, currentBytecode )
 		offset = ( offset - 4 ) * 256 + fetchByte()
-		ST_TRACE_BYTECODE("offset:", offset )
+		-- ST_TRACE_BYTECODE("offset:", offset )
 		jump( offset )
     elseif b >= 168 and b <= 175 then
         -- longConditionalJump()
 		local offset = C.St_extractBits( 14, 15, currentBytecode )
 		offset = offset * 256 + fetchByte()
-		ST_TRACE_BYTECODE("offset:", offset )
+		-- ST_TRACE_BYTECODE("offset:", offset )
 		if currentBytecode >= 168 and currentBytecode <= 171 then
 			jumpif( true, offset )
 		elseif currentBytecode >= 172 and currentBytecode <= 175 then
@@ -902,7 +903,15 @@ local function checkProcessSwitch()
 end
 
 local function cycle()
-	checkProcessSwitch() 
+	local pending = C.St_pendingEvents()
+	for i=1,pending do
+		-- asynchronousSignal(inputSemaphore) inlined
+		if inputSemaphore then
+			semaphoreIndex = semaphoreIndex + 1
+			semaphoreList[semaphoreIndex] = inputSemaphore
+		end
+	end
+checkProcessSwitch() 
 	currentBytecode = fetchByte()
 	cycleNr = cycleNr + 1
 	-- TRAP( cycleNr==1677 )
@@ -916,7 +925,7 @@ function module.interpret()
     local firstContext = activeProcess()[1] -- SuspendedContextIndex
 	newActiveContext( firstContext )
 	print "start main loop"
-	while C.St_isRunning() ~= 0 and cycleNr < 121000 do 
+	while C.St_isRunning() ~= 0 do -- and cycleNr < 121000 do 
 		cycle()
 		C.St_processEvents()
 	end
@@ -2200,7 +2209,7 @@ end
 primitive[100] = primitive.SignalAtTick
 
 function primitive.BeCursor() -- primitiveBeCursor
-    ST_TRACE_PRIMITIVE("");
+    -- ST_TRACE_PRIMITIVE("");
     local cursor = popStack()
 	local bitmap = cursor[0].data
     local width = cursor[1]

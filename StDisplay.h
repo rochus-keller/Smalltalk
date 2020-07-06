@@ -51,8 +51,15 @@ public:
         Q_ASSERT( i < d_wordLen );
         d_buf[i] = v;
     }
+    inline bool bitAt(quint16 x, quint16 y) const
+    {
+        quint16* line = d_buf + y * d_wordWidth;
+        const quint8 bitpos = 15 - x % 16 ;
+        const quint16 pat = 1 << bitpos;
+        return ( line[x>>4] & pat ) > 0;
+    }
 private:
-    quint16 d_pixWidth, d_pixHeight, d_wordLen;
+    quint16 d_pixWidth, d_pixHeight, d_wordLen, d_wordWidth;
     quint16* d_buf;
 };
 #else
@@ -116,6 +123,7 @@ private:
     {
         Q_OBJECT
     public:
+        typedef void (*EventCallback)();
         enum EventType {
             DeltaTime = 0,
             XLocation = 1,
@@ -139,11 +147,13 @@ private:
         void setCursorPos( qint16 x, qint16 y );
         const QPoint& getMousePos() const { return d_mousePos; }
         quint16 nextEvent() { return d_events.dequeue(); }
+        void clearEvents() { d_events.clear(); }
         quint32 getTicks() const { return d_timer.elapsed(); }
         void drawRecord( int x, int y, int w, int h );
         bool isRecOn() const { return d_recOn; }
         void updateArea(const QRect& r);
         void setLog(bool on);
+        void setEventCallback( EventCallback cb ) { d_eventCb = cb; }
     signals:
         void sigEventQueue();
 
@@ -168,6 +178,7 @@ private:
         bool postEvent(EventType, quint16 param = 0 , bool withTime = true);
         bool keyEvent( int keyCode, char ch, bool down );
         void sendShift(bool keyPress, bool shiftRequired);
+        void notify();
     private:
         Bitmap d_bitmap;
         QImage d_screen;
@@ -178,6 +189,7 @@ private:
         quint32 d_lastEvent; // number of milliseconds since last event was posted to queue
         QElapsedTimer d_timer;
         QImage d_record;
+        EventCallback d_eventCb;
         bool d_shiftDown, d_capsLockDown, d_recOn, d_forceClose;
     };
 

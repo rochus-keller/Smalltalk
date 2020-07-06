@@ -53,7 +53,7 @@ void messageHander(QtMsgType type, const QMessageLogContext& ctx, const QString&
 }
 
 Display::Display(QWidget *parent) : QWidget(parent),d_curX(-1),d_curY(-1),d_capsLockDown(false),
-    d_shiftDown(false),d_recOn(false),d_forceClose(false)
+    d_shiftDown(false),d_recOn(false),d_forceClose(false),d_eventCb(0)
 {
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
@@ -167,8 +167,20 @@ void Display::updateArea(const QRect& r )
         }
     }
 #else
-    // TODO
-    d_screen = d_bitmap.toImage();
+    const int w = r.width();
+    const int h = r.height();
+    if( w > d_bitmap.width() / 3 && h > d_bitmap.height() / 3 )
+        d_screen = d_bitmap.toImage();
+    else
+    {
+        const int y = r.y();
+        const int x = r.x();
+        for( int _y = 0; _y < h; _y++ )
+        {
+            for( int _x = 0; _x < w; _x++ )
+                d_screen.setPixel(_x+x,_y+y, d_bitmap.bitAt(_x+x,_y+y) ? blackPixel : whitePixel );
+        }
+    }
 #endif
 
     update( r );
@@ -411,19 +423,19 @@ bool Display::postEvent(Display::EventType t, quint16 param, bool withTime )
         if( diff <= MaxPos )
         {
             d_events.enqueue( compose( DeltaTime, diff ) );
-            emit sigEventQueue();
+            notify();
         }else
         {
             d_events.enqueue( compose( AbsoluteTime, 0 ) );
-            emit sigEventQueue();
+            notify();
             d_events.enqueue( ( time >> 16 ) & 0xffff);
-            emit sigEventQueue();
+            notify();
             d_events.enqueue( time & 0xffff );
-            emit sigEventQueue();
+            notify();
         }
     }
     d_events.enqueue( compose( t, param ) );
-    emit sigEventQueue();
+    notify();
     return true;
 }
 
@@ -593,6 +605,13 @@ void Display::sendShift(bool keyPress, bool shiftRequired)
         postEvent( !keyPress ? BiStateOn : BiStateOff, 136 );
 }
 
+void Display::notify()
+{
+    emit sigEventQueue();
+    if( d_eventCb )
+        d_eventCb();
+}
+
 #ifndef ST_DISPLAY_WORDARRY
 Bitmap::Bitmap(quint8* buf, quint16 wordLen, quint16 pixWidth, quint16 pixHeight)
 {
@@ -659,7 +678,9 @@ Bitmap::Bitmap(quint16* array, quint16 wordLen, quint16 pixWidth, quint16 pixHei
     d_wordLen = wordLen;
     d_pixWidth = pixWidth;
     d_pixHeight = pixHeight;
-    Q_ASSERT( ( ( d_pixWidth + 15 ) / 16 ) * d_pixHeight == d_wordLen );
+    d_wordWidth = ( d_pixWidth + 15 ) / 16;
+
+    Q_ASSERT( d_wordWidth * d_pixHeight == d_wordLen );
 }
 
 QImage Bitmap::toImage() const
@@ -667,12 +688,11 @@ QImage Bitmap::toImage() const
     if( isNull() )
         return QImage();
     QImage img( d_pixWidth, d_pixHeight, QImage::Format_Mono );
-    const int maxw = ( d_pixWidth + 15 ) / 16;
     for( int y = 0; y < d_pixHeight; y++ )
     {
         uchar* dest = img.scanLine(y);
-        quint16* line = d_buf + y * maxw;
-        for( int x = 0; x < maxw; x++ )
+        quint16* line = d_buf + y * d_wordWidth;
+        for( int x = 0; x < d_wordWidth; x++ )
         {
             const quint16 src = ~line[x];
             const int bx = x << 1;

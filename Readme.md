@@ -100,7 +100,7 @@ This is a Lua translation of the C++ based VM described above.
 
 This is work in progress; the interpreter reproduces the original Xerox trace2 and trace3 files included with http://www.wolczko.com/st80/image.tar.gz; the initial screen after startup corresponds to the screenshot shown on page 3 of the "Smalltalk 80 Virtual Image Version 2" manual; even the trace log of the first 121k cycles (the time to fully display the initial screen) is identical with the one produced by the C++ implementation.
 
-Since the whole interpreter is written in Lua which runs on LuaJIT the approach can be seen as a "meta-tracing JIT" comparable to implementations based on RPython or Truffle.
+Since the whole interpreter is written in Lua which runs on LuaJIT the approach can be seen as a "meta-tracing JIT" comparable to implementations based on RPython or Truffle. The performance of the VM is good, but not yet optimal. I did some measurements on my laptop (Intel Core Duo L9400 1.86GHz, 4GB) RAM, Linux i386). It takes about 830 ms to run the first 121k cycles with the C++ version of the VM, and about 1000 ms with the LuaJIT version (with trace functions commented out, otherwise it takes about 250 ms more).
 
 The VM integrates a Lua IDE with source-level debugger (see https://github.com/rochus-keller/LjTools#lua-parser-and-ide-features).  
 
