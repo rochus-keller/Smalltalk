@@ -2037,7 +2037,8 @@ void Interpreter::pushFloat(float v)
 void Interpreter::primitiveAt()
 {
     ST_TRACE_PRIMITIVE("");
-    int index = positive16BitValueOf( popStack() );
+    OOP tmp = popStack();
+    int index = positive16BitValueOf( tmp );
     OOP array = popStack();
     OOP arrayClass = memory->fetchClassOf(array);
     checkIndexableBoundsOf(index, array);

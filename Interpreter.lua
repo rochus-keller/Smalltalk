@@ -74,6 +74,10 @@ ffi.cdef[[
                           int destX, int destY, int width, int height,
                           int sourceX, int sourceY,
                           int clipX, int clipY, int clipWidth, int clipHeight );
+    void St_timeWords( ByteArray* ba );
+    void St_tickWords( ByteArray* ba );
+    void St_wakeupOn( ByteArray* ba );
+    int St_itsTime();
 ]]
 
 ------------------ Module Data ------------------------------------------
@@ -96,6 +100,7 @@ local newProcessWaiting = false
 local primitive = {}
 local success = true
 local cycleNr = 0
+local toSignal
 
 ------------------ Cached Objects ------------------------------------------
 local bitand
@@ -502,6 +507,7 @@ local function fetchContextRegisters()
     receiver = homeContext[5] -- ReceiverIndex
     method = homeContext[3] -- MethodIndex
     methodBytecode = method.bytecode
+    assert(methodBytecode)
     instructionPointer = activeContext[1] - 1 -- InstructionPointerIndex instructionPointerOfContext(activeContext)
     stackPointer = activeContext[2] + 6 - 1 -- StackPointerIndex stackPointerOfContext(activeContext) TempFrameStart
 end
@@ -911,10 +917,16 @@ local function cycle()
 			semaphoreList[semaphoreIndex] = inputSemaphore
 		end
 	end
-checkProcessSwitch() 
+	TRAP(cycleNr==121000)
+	pending = C.St_itsTime()
+	if pending > 0 then
+		-- asynchronousSignal(toSignal) inlined
+		semaphoreIndex = semaphoreIndex + 1
+		semaphoreList[semaphoreIndex] = toSignal
+	end
+    checkProcessSwitch() 
 	currentBytecode = fetchByte()
 	cycleNr = cycleNr + 1
-	-- TRAP( cycleNr==1677 )
 	dispatchOnThisBytecode()
 end
 
@@ -1434,7 +1446,13 @@ local function positive16BitValueOf(integerPointer)
 end
 
 local function lengthOf(array)
-	return array.count or array.data.count
+	if array == nil then
+		return 0
+	elseif array.bytecode then
+		return (array.count+1)*2 + array.bytecode.count
+	else
+		return array.count or array.data.count
+	end
 end
 
 local function subscriptWith(array, index)
@@ -1457,7 +1475,8 @@ end
 
 function primitive.At() -- primitiveAt
     -- ST_TRACE_PRIMITIVE("");
-    local index = positive16BitValueOf( popStack() )
+    local tmp = popStack()
+    local index = positive16BitValueOf( tmp )
     local array = popStack()
     local arrayClass = fetchClassOf(array)
     -- checkIndexableBoundsOf inlined
@@ -1468,7 +1487,8 @@ function primitive.At() -- primitiveAt
     if success then
         index  = index + fixed
         if arrayClass == classCompiledMethod then
-        	result = array.bytecode.data[index-1-array.count-1] -- index - initialPc
+	        local initPc = (array.count+1)*2
+        	result = array.bytecode.data[index-1-initPc] -- index - initialPc
         else
         	result = subscriptWith(array,index)
         end
@@ -1494,7 +1514,8 @@ function primitive.AtPut() -- primitiveAtPut
     if success then
         index  = index + fixed
         if arrayClass == classCompiledMethod then
-        	array.bytecode.data[index-1-array.count-1] = value -- index - initialPc
+	        local initPc = (array.count+1)*2
+        	array.bytecode.data[index-1-initPc] = value -- index 
         else
         	subscriptWithStoring(array,index,value)
         end
@@ -1574,6 +1595,7 @@ function primitive.Next() -- primitiveNext
     local classArray = memory.knownObjects[0x10] -- classArray
     success = success and ( arrayClass == classArray or 
 	    arrayClass == memory.knownObjects[0x0e] ) -- classString
+	-- NOTE: this primitive only supports classArray and classString objects
     index = index + 1
     -- checkIndexableBoundsOf inlined
     local instSpec = arrayClass[2] -- InstanceSpecIndex
@@ -1611,6 +1633,7 @@ function primitive.NextPut() -- primitiveNextPut
     local classArray = memory.knownObjects[0x10] -- classArray
     success = success and ( arrayClass == classArray or 
 	    arrayClass == memory.knownObjects[0x0e] ) -- classString
+	-- NOTE: this primitive only supports classArray and classString objects
     index = index + 1
     -- checkIndexableBoundsOf inlined
     local instSpec = arrayClass[2] -- InstanceSpecIndex
@@ -1619,9 +1642,6 @@ function primitive.NextPut() -- primitiveNextPut
     if success then
         if arrayClass == classArray then
             subscriptWithStoring(array,index,value)
-        elseif arrayClass == classCompiledMethod then
-        	-- TODO index - initialPc to bytecode
-        	print "primitive.NextPut for classCompiledMethod not implemented"
         else
             local ascii = value[0] -- character value index 0
             subscriptWithStoring(array,index,ascii)
@@ -1668,7 +1688,7 @@ function primitive.ObjectAt() -- primitiveObjectAt
     local index = popInteger()
     local thisReceiver = popStack()
     success = success and index > 0
-    success = success and index <= thisReceiver.count
+    success = success and index <= ( thisReceiver.count + 1 )
     index = index - 1
     if success then
     	if index == 0 then
@@ -1689,7 +1709,7 @@ function primitive.ObjectAtPut() -- primitiveObjectAtPut
     local index = popInteger()
     local thisReceiver = popStack()
     success = success and index > 0
-    success = success and index <= thisReceiver.count
+    success = success and index <= ( thisReceiver.count + 1 )
     index = index - 1
     if success then
     	if index == 0 then
@@ -2188,23 +2208,21 @@ end
 primitive[97] = primitive.Snapshot
 
 function primitive.TimeWordsInto() -- primitiveTimeWordsInto
-	-- TODO
-	popStack() -- LargePositiveInteger
-	print "WARNING: primitiveTimeWordsInto not yet implemented"
+	local array = popStack() -- LargePositiveInteger
+	C.St_timeWords(array.data)
 end
 primitive[98] = primitive.TimeWordsInto
 
 function primitive.TickWordsInto() -- primitiveTickWordsInto
-	-- TODO
-	popStack() -- LargePositiveInteger
-	print "WARNING: primitiveTickWordsInto not yet implemented"
+	local array = popStack() -- LargePositiveInteger
+	C.St_tickWords(array.data)
 end
 primitive[99] = primitive.TickWordsInto
 
 function primitive.SignalAtTick() -- primitiveSignalAtTick
-    local oop = popStack() -- LargePositiveInteger
-    local toSignal = popStack()
-	print "WARNING: primitiveSignalAtTick not yet implemented"
+    local time = popStack() -- LargePositiveInteger
+    toSignal = popStack()
+    C.St_wakeupOn(time.data)
 end
 primitive[100] = primitive.SignalAtTick
 

@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <QFile>
+#include <QDateTime>
 #include "StDisplay.h"
 #include "StLjObjectMemory.h"
 #include <LjTools/Engine2.h>
@@ -104,7 +105,7 @@ DllExport void St_stop()
 {
     St::Display::s_run = false;
     const quint32 stopTime = St::Display::inst()->getTicks();
-    qWarning() << "runtime [ms]:" << ( stopTime - s_startTime );
+    qDebug() << "runtime [ms]:" << ( stopTime - s_startTime );
 }
 
 static int s_pendingEvents = 0;
@@ -311,6 +312,50 @@ DllExport void St_bitBlt( WordArray* destBits, int destW, int destH,
     if( drawToDisp && same )
         qDebug() << "copyBits didn't change anything in" << count;
 #endif
+}
+
+DllExport void St_timeWords( ByteArray* ba )
+{
+    const quint32 diff = QDateTime( QDate( 1901, 1, 1 ), QTime( 0, 0, 0 ) ).secsTo(QDateTime::currentDateTime());
+    // NOTE: unexpected byte order, but empirically validated with primitiveSignalAtTick that it's the right one
+    if( ba->count != 4 )
+        qWarning() << "St_tickWords unusual bytearray length" << ba->count;
+    for( int i = 0; i < ba->count; i++ )
+        ba->data[i] = ( diff >> ( i * 8 ) ) & 0xff;
+}
+
+DllExport void St_tickWords( ByteArray* ba )
+{
+    const quint32 ticks = St::Display::inst()->getTicks();
+    // NOTE: unexpected byte order, but empirically validated with primitiveSignalAtTick that it's the right one
+    if( ba->count != 4 )
+        qWarning() << "St_tickWords unusual bytearray length" << ba->count;
+    for( int i = 0; i < ba->count; i++ )
+        ba->data[i] = ( ticks >> ( i * 8 ) ) & 0xff;
+}
+
+static quint32 s_wakeup = 0;
+
+DllExport void St_wakeupOn( ByteArray* ba )
+{
+    Q_ASSERT( ba->count == 4 );
+    s_wakeup =  ( ba->data[3] << 24 ) |
+    ( ba->data[3] << 16 ) |
+    ( ba->data[1] << 8 ) |
+    ba->data[0];
+}
+
+DllExport int St_itsTime()
+{
+    if( s_wakeup == 0 )
+        return 0;
+    quint32 ticks = St::Display::inst()->getTicks();
+    if( ticks >= s_wakeup )
+    {
+        s_wakeup = 0;
+        return 1;
+    }else
+        return 0;
 }
 
 }

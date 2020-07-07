@@ -148,7 +148,7 @@ private:
         const QPoint& getMousePos() const { return d_mousePos; }
         quint16 nextEvent() { return d_events.dequeue(); }
         void clearEvents() { d_events.clear(); }
-        quint32 getTicks() const { return d_timer.elapsed(); }
+        quint32 getTicks() const { return d_elapsed.elapsed(); }
         void drawRecord( int x, int y, int w, int h );
         bool isRecOn() const { return d_recOn; }
         void updateArea(const QRect& r);
@@ -187,7 +187,7 @@ private:
         QPoint d_mousePos;
         QQueue<quint16> d_events;
         quint32 d_lastEvent; // number of milliseconds since last event was posted to queue
-        QElapsedTimer d_timer;
+        QElapsedTimer d_elapsed;
         QImage d_record;
         EventCallback d_eventCb;
         bool d_shiftDown, d_capsLockDown, d_recOn, d_forceClose;

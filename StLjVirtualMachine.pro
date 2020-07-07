@@ -25,7 +25,7 @@ QT += printsupport
 TARGET = St80LjVirtualMachine
 TEMPLATE = app
 
-INCLUDEPATH += ..
+INCLUDEPATH += .. ../LuaJIT/src
 
 DEFINES += ST_DISPLAY_WORDARRY
 

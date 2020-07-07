@@ -61,7 +61,7 @@ Display::Display(QWidget *parent) : QWidget(parent),d_curX(-1),d_curY(-1),d_caps
     setWindowTitle( renderTitle() );
     show();
     d_lastEvent = 0;
-    d_timer.start();
+    d_elapsed.start();
     // startTimer(s_msPerFrame);
 #ifndef ST_DISPLAY_WORDARRY
     new QShortcut(tr("ALT+R"), this, SLOT(onRecord()) );
@@ -306,7 +306,7 @@ void Display::mouseMoveEvent(QMouseEvent* event)
     if( d_mousePos.y() >= height() )
         d_mousePos.setY( height() - 1 );
 
-    quint32 diff = d_timer.elapsed() - d_lastEvent;
+    quint32 diff = d_elapsed.elapsed() - d_lastEvent;
     if( diff < s_msPerFrame )
         return;
 
@@ -416,7 +416,7 @@ bool Display::postEvent(Display::EventType t, quint16 param, bool withTime )
 
     if( withTime )
     {
-        quint32 time = d_timer.elapsed();
+        quint32 time = d_elapsed.elapsed();
         quint32 diff = time - d_lastEvent;
         d_lastEvent = time;
 

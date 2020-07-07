@@ -96,23 +96,23 @@ I don't seem to be the only one interested in an original Blue Book Smalltalk-80
 
 ### A Smalltalk-80 Interpreted Virtual Machine on LuaJIT
 
-This is a Lua translation of the C++ based VM described above. 
+This is a Lua translation of the C++ based VM described above. The interpreter including the primitives (besides BitBlt) was re-implemented in Lua. The object memory is replaced with the LuaJIT memory manager; nil, Boolean and SmallInteger are directly represented by Lua primitive types; Smalltalk objects are represented by Lua tables; byte and word arrays use LuaJIT FFI native types (see StLjObjectMemory.cpp for more information).
 
-This is work in progress; the interpreter reproduces the original Xerox trace2 and trace3 files included with http://www.wolczko.com/st80/image.tar.gz; the initial screen after startup corresponds to the screenshot shown on page 3 of the "Smalltalk 80 Virtual Image Version 2" manual; even the trace log of the first 121k cycles (the time to fully display the initial screen) is identical with the one produced by the C++ implementation.
+The interpreter reproduces the original Xerox trace2 and trace3 files included with http://www.wolczko.com/st80/image.tar.gz; the initial screen after startup corresponds to the screenshot shown on page 3 of the "Smalltalk 80 Virtual Image Version 2" manual; even the trace log of the first 121k cycles (the time to fully display the initial screen) is identical with the one produced by the C++ implementation.
 
-Since the whole interpreter is written in Lua which runs on LuaJIT the approach can be seen as a "meta-tracing JIT" comparable to implementations based on RPython or Truffle. The performance of the VM is good, but not yet optimal. I did some measurements on my laptop (Intel Core Duo L9400 1.86GHz, 4GB) RAM, Linux i386). It takes about 830 ms to run the first 121k cycles with the C++ version of the VM, and about 1000 ms with the LuaJIT version (with trace functions commented out, otherwise it takes about 250 ms more).
+Since the whole interpreter is written in Lua which runs on LuaJIT the approach could be seen as a "meta-tracing JIT" comparable to implementations based on RPython. The performance of the VM is good, but not yet optimal. I did some measurements on my laptop (Intel Core Duo L9400 1.86GHz, 4GB RAM, Linux i386). It takes about 830 ms to run the first 121k cycles with the C++ version of the VM, and about 1000 ms with the LuaJIT version (with trace functions commented out, otherwise it takes about 250 ms more). A full run of Benchmark testStandardTests takes 142 seconds with the C++ version and 161 seconds with the LuaJIT version. It is fair to conclude that the same program takes only a factor of 1.13 more time when run on LuaJIT compared to the native version. This confirms the findings with my Oberon compiler (see https://github.com/rochus-keller/Oberon/blob/master/testcases/Hennessy_Results). 
 
-The VM integrates a Lua IDE with source-level debugger (see https://github.com/rochus-keller/LjTools#lua-parser-and-ide-features).  
+The VM integrates a Lua IDE with source-level debugger (see https://github.com/rochus-keller/LjTools#lua-parser-and-ide-features); the IDE can be enabled by the -ide or -pro command line option.
 
-More to come. 
+Here is a screenshot of the running VM with the Lua IDE/debugger with stack trace and local variables stepping at cycle 121000:
 
+![Screenshot](http://software.rochus-keller.info/smalltalk80_lj_vm_0.5.png)
 
 
 ### Binary versions
 
-Here is a binary version of the Class Browser, the Image Viewer and the Virtual Machine for Windows: http://software.rochus-keller.info/St80Tools_win32.zip.
-Just unpack the ZIP somewhere on your drive and double-click St80ClassBrowser.exe or St80ImageViewer.exe; Qt libraries are included as well as the 
-original Smalltalk-80.sources and VirtualImage file.
+Here is a binary version of the class browser, the image viewer and the virtual machines for Windows: http://software.rochus-keller.info/St80Tools_win32.zip.
+Just unpack the ZIP somewhere on your drive and double-click St80ClassBrowser.exe, St80ImageViewer.exe, St80VirtualMachine.exe or St80LjVirtualMachine.exe; Qt libraries are included as well as the original Smalltalk-80.sources and VirtualImage file.
 
 ### Build Steps
 
