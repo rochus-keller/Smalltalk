@@ -162,6 +162,7 @@ private:
         void onExit();
         void onLog();
         void onBreak();
+        void onPaste();
 
     protected:
         void paintEvent(QPaintEvent *);
@@ -177,6 +178,7 @@ private:
         QString renderTitle() const;
         bool postEvent(EventType, quint16 param = 0 , bool withTime = true);
         bool keyEvent( int keyCode, char ch, bool down );
+        void simulateKeyEvent( char ch );
         void sendShift(bool keyPress, bool shiftRequired);
         void notify();
     private:

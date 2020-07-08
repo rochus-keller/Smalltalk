@@ -917,7 +917,6 @@ local function cycle()
 			semaphoreList[semaphoreIndex] = inputSemaphore
 		end
 	end
-	TRAP(cycleNr==121000)
 	pending = C.St_itsTime()
 	if pending > 0 then
 		-- asynchronousSignal(toSignal) inlined

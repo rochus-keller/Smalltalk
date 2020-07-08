@@ -27,6 +27,7 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QShortcut>
+#include <QClipboard>
 using namespace St;
 
 #define _USE_BB_IMP_
@@ -65,12 +66,13 @@ Display::Display(QWidget *parent) : QWidget(parent),d_curX(-1),d_curY(-1),d_caps
     // startTimer(s_msPerFrame);
 #ifndef ST_DISPLAY_WORDARRY
     new QShortcut(tr("ALT+R"), this, SLOT(onRecord()) );
-    new QShortcut(tr("ALT+X"), this, SLOT(onExit()) );
     new QShortcut(tr("ALT+L"), this, SLOT(onLog()) );
+    new QShortcut(tr("ALT+X"), this, SLOT(onExit()) );
     new QShortcut(tr("ALT+B"), this, SLOT(onBreak()) );
 
     s_oldHandler = qInstallMessageHandler(messageHander);
 #endif
+    new QShortcut(tr("ALT+V"), this, SLOT(onPaste()) );
 }
 
 Display::~Display()
@@ -234,6 +236,15 @@ void Display::onBreak()
         return;
     s_break = true;
     qWarning() << "break started";
+}
+
+void Display::onPaste()
+{
+    const QByteArray text = QApplication::clipboard()->text().toLatin1();
+    for( int i = 0; i < text.size(); i++ )
+    {
+        simulateKeyEvent(text[i]);
+    }
 }
 
 void Display::paintEvent(QPaintEvent* event)
@@ -595,6 +606,37 @@ bool Display::keyEvent(int keyCode, char ch, bool down)
         }
     }
     return false;
+}
+
+void Display::simulateKeyEvent(char ch)
+{
+    switch( ch )
+    {
+    case ' ':
+        keyEvent(Qt::Key_Space,0,true);
+        keyEvent(Qt::Key_Space,0,false);
+        return;
+    case '\n':
+        keyEvent(Qt::Key_Return,0,true);
+        keyEvent(Qt::Key_Return,0,false);
+        return;
+    case '\r':
+        return;
+    case 0x08:
+        keyEvent(Qt::Key_Backspace,0,true);
+        keyEvent(Qt::Key_Backspace,0,false);
+        return;
+    case 0x09:
+        keyEvent(Qt::Key_Tab,0,true);
+        keyEvent(Qt::Key_Tab,0,false);
+        return;
+    case 0x1b:
+        keyEvent(Qt::Key_Escape,0,true);
+        keyEvent(Qt::Key_Escape,0,false);
+        return;
+    }
+    keyEvent(0,ch,true);
+    keyEvent(0,ch,false);
 }
 
 void Display::sendShift(bool keyPress, bool shiftRequired)
