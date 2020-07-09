@@ -78,6 +78,9 @@ ffi.cdef[[
     void St_tickWords( ByteArray* ba );
     void St_wakeupOn( ByteArray* ba );
     int St_itsTime();
+    void St_update( WordArray* destBits,
+                          int destX, int destY, int width, int height,
+                          int clipX, int clipY, int clipWidth, int clipHeight );
 ]]
 
 ------------------ Module Data ------------------------------------------
@@ -2157,6 +2160,11 @@ function primitive.InputWord() -- primitiveInputWord
 end
 primitive[95] = primitive.InputWord
 
+local RightMasks = { [0]=0, [1]=0x1, [2]=0x3, [3]=0x7, [4]=0xf,
+       [5]=0x1f, [6]=0x3f, [7]=0x7f, [8]=0xff,
+       [9]=0x1ff, [10]=0x3ff, [11]=0x7ff, [12]=0xfff,
+       [13]=0x1fff, [14]=0x3fff, [15]=0x7fff, [16]=0xffff }
+       
 function primitive.CopyBits() -- primitiveCopyBits
 	local bitblt = stackTop()
 
@@ -2189,8 +2197,239 @@ function primitive.CopyBits() -- primitiveCopyBits
 	end
 
     --ST_TRACE_PRIMITIVE()
+    
+    ----[[
+    local function bitBlt( destBits, destW, destH,
+                          sourceBits, srcW, srcH,
+                          htBits, htW, htH,
+                          combinationRule,
+                          destX, destY, width, height,
+                          sourceX, sourceY,
+                          clipX, clipY, clipWidth, clipHeight )
+	    local sourceRaster
+        local destRaster
+        local skew, mask1, mask2, skewMask, nWords, vDir, hDir
+        local sx, sy, dx, dy, w, h -- pixel
+        local sourceIndex, destIndex, sourceDelta, destDelta
+        local preload
 
-	C.St_bitBlt( destBits, destW, destH, 
+	    local function clipRange()
+            -- set sx/y, dx/y, w and h so that dest doesn't exceed clipping range and
+            -- source only covers what needed by clipped dest
+            if destX >= clipX then
+                sx = sourceX
+                dx = destX
+                w = width
+            else
+                sx = sourceX + ( clipX - destX )
+                w = width - ( clipX - destX )
+                dx = clipX
+            end
+            if ( dx + w ) > ( clipX + clipWidth ) then
+                w = w - ( ( dx + w ) - ( clipX + clipWidth ) )
+            end
+            if destY >= clipY then
+                sy = sourceY
+                dy = destY
+                h = height
+            else
+                sy = sourceY + clipY - destY
+                h = height - clipY + destY
+                dy = clipY
+            end
+            if ( dy + h ) > ( clipY + clipHeight ) then
+                h = h - ( ( dy + h ) - ( clipY + clipHeight ) )
+            end
+            if sx < 0 then
+                dx = dx - sx;
+                w = w + sx;
+                sx = 0;
+            end
+            if sourceBits and ( sx + w ) > srcW then
+                w = w - ( sx + w - srcW )
+            end
+            if sy < 0 then
+                dy = dy - sy
+                h = h + sy
+                sy = 0
+            end
+            if sourceBits and ( sy + h ) > srcH then
+                h = h - ( sy + h - srcH )
+            end
+        end
+        
+        local function computeMasks()
+            destRaster = mathfloor( ( ( destW - 1 ) / 16 ) + 1 )
+            if sourceBits then
+                sourceRaster = mathfloor( ( ( srcW - 1 ) / 16 ) + 1 )
+            else
+	            sourceRaster = 0
+            end
+            skew = bitand( ( sx - dx ), 15 )
+            local startBits = 16 - bitand( dx , 15 )
+            mask1 = RightMasks[ startBits ]
+            local endBits = 15 - bitand( ( dx + w - 1 ), 15 )
+            mask2 = bit.bnot( RightMasks[ endBits ] )
+            if skew == 0 then
+	            skewMask = 0
+	        else
+	            skewMask = RightMasks[ 16 - skew  ]
+            end
+            if w < startBits then
+                mask1 = bitand( mask1, mask2 )
+                mask2 = 0
+                nWords = 1
+            else
+                nWords = mathfloor( ( w - startBits + 15) / 16 + 1 )
+            end
+        end
+
+		local function checkOverlap()
+            hDir = 1
+            vDir = 1
+            if sourceBits == destBits and dy >= sy then
+                if dy > sy then
+                    vDir = -1
+                    sy = sy + h - 1
+                    dy = dy + h - 1
+                elseif dx > sx then
+                    hDir = -1
+                    sx = sx + w - 1
+                    dx = dx + w - 1
+                    skewMask = bit.bnot(skewMask)
+                    local t = mask1
+                    mask1 = mask2
+                    mask2 = t
+                end -- if
+            end -- if
+        end -- checkOverlap
+   
+		local function calculateOffsets()
+            preload = ( sourceBits and skew ~= 0 and skew <= bitand( sx, 15 ) )
+            if hDir < 0 then
+                preload = preload == false
+            end
+            sourceIndex = sy * sourceRaster + mathfloor( sx / 16 )
+            destIndex = dy * destRaster + mathfloor( dx / 16 )
+            local off = 0
+            if preload then
+	            off = 1
+	        end
+            sourceDelta = ( sourceRaster * vDir ) - ( (nWords + off ) * hDir )
+            destDelta = ( destRaster * vDir ) - ( nWords * hDir )
+        end  -- calculateOffsets
+        
+	    local function copyLoop()
+            local prevWord, thisWord, skewWord, mergeMask, halftoneWord, mergeWord, word
+            local bitor = bit.bor
+            local bitnot = bit.bnot
+            local lshift = bit.lshift
+            local rshift = bit.rshift
+            local bitxor = bit.bxor
+            local function merge(combinationRule, source, destination)
+				if combinationRule == 0 then
+					return 0
+				elseif combinationRule == 1 then
+					return bitand(source, destination)
+				elseif combinationRule == 2 then
+					return bitand( source, bitnot(destination) )
+				elseif combinationRule == 3 then
+					return source
+				elseif combinationRule == 4 then
+					return bitand( bitnot(source), destination )
+				elseif combinationRule == 5 then
+					return destination
+				elseif combinationRule == 6 then
+					return bitxor( source, destination )
+				elseif combinationRule == 7 then
+					return bitor( source, destination )
+				elseif combinationRule == 8 then
+					return bitand( bitnot(source), bitnot(destination) )
+				elseif combinationRule == 9 then
+					return bitxor( bitnot(source), destination )
+				elseif combinationRule == 10 then
+					return bitnot(destination)
+				elseif combinationRule == 11 then
+					return bitor( source, bitnot(destination) )
+				elseif combinationRule == 12 then
+					return bitnot(source)
+				elseif combinationRule == 13 then
+					return bitor( bitnot(source), destination )
+				elseif combinationRule == 14 then
+					return bitor( bitnot(source), bitnot(destination) )
+				elseif combinationRule == 15 then
+					return 0xffff -- AllOnes
+				else
+					print "WARNING: unknown combination rule"
+					return 0
+				end
+			end -- merge
+            
+            for i = 1, h do
+                if htBits then
+                    halftoneWord = htBits.data[ bitand( dy, 15 ) ] -- left out +1 since we're 0 based
+                    dy = dy + vDir
+                else
+                    halftoneWord = 0xffff -- AllOnes
+                end
+                skewWord = halftoneWord
+                if preload and sourceBits then
+                    prevWord = sourceBits.data[ sourceIndex ] -- left out +1
+                    sourceIndex = sourceIndex + hDir
+                else
+                    prevWord = 0
+                end
+                mergeMask = mask1;
+                for word = 1, nWords do
+                    if sourceBits then
+                        prevWord = bitand( prevWord, skewMask )
+                        if word <= sourceRaster and sourceIndex >= 0 and 
+	                        sourceIndex < sourceBits.count then
+                            thisWord = sourceBits.data[ sourceIndex ] -- left out +1
+                        else
+                            thisWord = 0
+                        end
+                        skewWord = bitor( prevWord, bitand( thisWord, bitnot(skewMask) ) )
+                        prevWord = thisWord
+                        skewWord = bitor( lshift( skewWord, skew ), rshift( skewWord, -( skew - 16 ) ) )
+                    end
+                    if destIndex >= destBits.count then
+                        return
+                    end
+                    local destWord =  destBits.data[ destIndex ] -- left out +1
+                    mergeWord = merge( combinationRule, bitand( skewWord, halftoneWord ), destWord )
+                    destBits.data[ destIndex ] =  -- left out +1
+	                    bitor( bitand( mergeMask, mergeWord ), bitand( bitnot(mergeMask), destWord ) )
+                    sourceIndex = sourceIndex + hDir
+                    destIndex = destIndex + hDir
+                    if word == ( nWords - 1 ) then
+                        mergeMask = mask2
+                    else
+                        mergeMask = 0xffff -- AllOnes
+                    end
+                end
+                sourceIndex = sourceIndex + sourceDelta
+                destIndex = destIndex + destDelta
+            end -- for
+        end  -- copyLoop
+        
+        clipRange()
+	    if w <= 0 or h <= 0 then
+	        return
+	    end
+	    computeMasks()
+	    checkOverlap()
+	    calculateOffsets()
+	    copyLoop()
+	    C.St_update( destBits,
+					  destX, destY, width, height,
+					  clipX, clipY, clipWidth, clipHeight )
+	end -- bitBlt
+	--]]
+
+	--C.St_bitBlt( 
+	bitBlt(
+		destBits, destW, destH, 
 		sourceBits, srcW, srcH, 
 		htBits, htW, htH,
 		bitblt[3], -- combinationRule

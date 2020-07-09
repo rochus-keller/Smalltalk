@@ -39,6 +39,7 @@ public:
     quint16 wordLen() const { return d_wordLen; }
     bool isNull() const { return d_buf == 0; }
     bool isSameBuffer( const Bitmap& rhs ) const { return rhs.d_buf == d_buf; }
+    bool isSameBuffer( quint16* buf ) const { return d_buf == buf; }
     inline quint16 wordAt(quint16 i) const
     {
         i--; // Smalltalk array indexes start with 1

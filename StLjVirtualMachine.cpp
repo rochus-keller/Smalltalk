@@ -104,7 +104,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk-80 on LuaJIT");
-    a.setApplicationVersion("0.5.1");
+    a.setApplicationVersion("0.5.2");
     a.setStyle("Fusion");
 
     QString imagePath;
@@ -113,7 +113,7 @@ int main(int argc, char *argv[])
     const QStringList args = QCoreApplication::arguments();
     for( int i = 1; i < args.size(); i++ ) // arg 0 enthaelt Anwendungspfad
     {
-        if(  args[i] == "-h" || args.size() == 1 )
+        if( args[i] == "-h" || args.size() == 1 )
         {
             QTextStream out(stdout);
             out << a.applicationName() << " version: " << a.applicationVersion() <<

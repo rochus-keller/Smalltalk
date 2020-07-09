@@ -314,6 +314,19 @@ DllExport void St_bitBlt( WordArray* destBits, int destW, int destH,
 #endif
 }
 
+DllExport void St_update( WordArray* destBits,
+                          int destX, int destY, int width, int height,
+                          int clipX, int clipY, int clipWidth, int clipHeight )
+{
+    St::Display* disp = St::Display::inst();
+    if( disp->getBitmap().isSameBuffer( destBits->data ) )
+    {
+        const QRect dest( destX,  destY,  width,  height);
+        const QRect clip( clipX, clipY, clipWidth, clipHeight );
+        disp->updateArea( dest & clip );
+    }
+}
+
 DllExport void St_timeWords( ByteArray* ba )
 {
     const quint32 diff = QDateTime( QDate( 1901, 1, 1 ), QTime( 0, 0, 0 ) ).secsTo(QDateTime::currentDateTime());
