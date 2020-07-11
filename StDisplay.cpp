@@ -102,7 +102,8 @@ void Display::forceClose()
 void Display::setBitmap(const Bitmap& buf)
 {
     d_bitmap = buf;
-    d_screen = d_bitmap.toImage();
+    d_screen = QImage( buf.width(), buf.height(), QImage::Format_RGB32 );
+    d_bitmap.toImage(d_screen);
     d_updateArea = QRect();
     setFixedSize( buf.width(), buf.height() );
     update();
@@ -110,13 +111,11 @@ void Display::setBitmap(const Bitmap& buf)
 
 void Display::setCursorBitmap(const Bitmap& bm)
 {
-#if 1 // use Qt cursor
-    QBitmap pix = QPixmap::fromImage( bm.toImage() );
+    QImage cursor( bm.width(), bm.height(), QImage::Format_RGB32 );
+    bm.toImage(cursor);
+    QBitmap pix = QPixmap::fromImage( cursor );
     setCursor( QCursor( pix, pix, 0, 0 ) );
-#else
-    d_cursor = bm.toImage();
-#endif
-    update();
+    // update();
 }
 
 void Display::setCursorPos(qint16 x, qint16 y)
@@ -128,7 +127,6 @@ void Display::setCursorPos(qint16 x, qint16 y)
 
 void Display::drawRecord(int x, int y, int w, int h)
 {
-    //qDebug() << "drawRec" << d_recOn;
     if( !d_recOn )
         return;
     QPainter p(&d_record);
@@ -216,7 +214,7 @@ void Display::paintEvent(QPaintEvent* event)
 
     if( !d_updateArea.isNull() )
     {
-        updateScreenBitmap(d_updateArea);
+        d_bitmap.toImage( d_screen, d_updateArea );
         d_updateArea = QRect();
     }
 
@@ -378,57 +376,6 @@ void Display::inputMethodEvent(QInputMethodEvent* event)
         keyEvent( 0, ch, true );
         keyEvent( 0, ch, false );
     }
-}
-
-void Display::updateScreenBitmap(const QRect& r)
-{
-#ifndef ST_DISPLAY_WORDARRY
-    const int w = r.width();
-    const int h = r.height();
-    if( w > d_bitmap.width() / 3 && h > d_bitmap.height() / 3 )
-    {
-        // full area
-
-        // using QImage is much faster than drawing single points with QPainter, but still rather slow as it seems
-        d_screen = d_bitmap.toImage();
-#if 0
-        const int lw = d_bitmap.lineWidth() / 8;
-        for( int y = 0; y < d_bitmap.height(); y++ )
-        {
-            uchar* dest = d_screen.scanLine(y);
-            const quint8* src = d_bitmap.scanLine(y);
-            for( int x = 0; x < lw; x++ )
-                dest[x] = ~src[x];
-            //memcpy( dest, src, lw );
-        }
-#endif
-    }else
-    {
-        // part of the area
-        const int y = r.y();
-        const int x = r.x();
-        for( int _y = 0; _y < h; _y++ )
-        {
-            for( int _x = 0; _x < w; _x++ )
-                d_screen.setPixel(_x+x,_y+y, d_bitmap.test(_x+x,_y+y) ? blackPixel : whitePixel );
-        }
-    }
-#else
-    const int w = r.width();
-    const int h = r.height();
-    if( w > d_bitmap.width() / 3 && h > d_bitmap.height() / 3 )
-        d_screen = d_bitmap.toImage();
-    else
-    {
-        const int y = r.y();
-        const int x = r.x();
-        for( int _y = 0; _y < h; _y++ )
-        {
-            for( int _x = 0; _x < w; _x++ )
-                d_screen.setPixel(_x+x,_y+y, d_bitmap.bitAt(_x+x,_y+y) ? blackPixel : whitePixel );
-        }
-    }
-#endif
 }
 
 QString Display::renderTitle() const
@@ -701,58 +648,44 @@ void Bitmap::wordAtPut(quint16 i, quint16 v)
     writeU16( d_buf, i * 2, v );
 }
 
-QImage Bitmap::toImage() const
+void Bitmap::toImage(QImage& img, QRect area) const
 {
     if( isNull() )
-        return QImage();
-#if 1
-    QImage img( width(), height(), QImage::Format_Mono );
-    const int lw = lineWidth() / 8;
-    for( int y = 0; y < height(); y++ )
-    {
-        uchar* dest = img.scanLine(y);
-        const quint8* src = scanLine(y);
-        for( int x = 0; x < lw; x++ )
-            dest[x] = ~src[x];
-    }
-#else
-    // not actually faster
-    QImage img( width(), height(), QImage::Format_RGB32 );
+        return;
+    Q_ASSERT( img.format() == QImage::Format_RGB32 && img.width() == d_pixWidth && img.height() == d_pixHeight );
     // more efficient than Mono because the Qt pipeline has to convert it otherwise
-    const int lw = lineWidth() / 8;
-    for( int y = 0; y < height(); y++ )
+
+    if( area.isNull() )
+        area = img.rect();
+    else
     {
-        quint32* dest = (quint32*)img.scanLine(y); // 0xffRRGGBB
-        const quint8* src = scanLine(y);
-        int pix = 0;
-        for( int x = 0; x < lw; x++ )
-        {
-            const quint8 byte = src[x];
-            for( int bit = 0; bit < 8; bit++ )
-                dest[pix+bit] = byte & ( 1 << ( 7 - bit ) ) ? 0xff000000 : 0xffffffff;
-            pix += 8;
-        }
+        Q_ASSERT( area.x() > 0 && ( area.x() + area.width() ) < d_pixWidth );
+        Q_ASSERT( area.y() > 0 && ( area.y() + area.height() ) < d_pixHeight );
     }
-#endif
-    return img;
+
+    const int sw = d_pixLineWidth / 8;
+    const int dw = img.bytesPerLine();
+    const uchar *src_data = d_buf;
+    uchar *dest_data = img.bits();
+    const int ax = area.x();
+    const int aw = area.width();
+    const int axaw = ax + aw;
+    const int ah = area.height();
+    const int ay = area.y();
+
+    src_data += sw * ay;
+    dest_data += dw * ay;
+    for( int y = 0; y < ah; y++ )
+    {
+        uint*p = (uint*)dest_data;
+        p += ax;
+        for( int x = ax; x < axaw; x++ )
+            *p++ = ((src_data[x>>3] >> (7 - (x & 7))) & 1) ? 0xff000000 : 0xffffffff;
+        src_data += sw;
+        dest_data += dw;
+    }
 }
 
-QImage Bitmap::toImage(quint16 x, quint16 y, quint16 w, quint16 h) const
-{
-    if( isNull() || x >= d_pixWidth || y >= d_pixHeight || ( x + w > d_pixWidth ) || ( y + h > d_pixHeight ) )
-        return QImage();
-    QImage img( w, h, QImage::Format_Mono );
-    img.fill(1);
-    for( int yy = 0; yy < h; yy++ )
-    {
-        for( int xx = 0; xx < w; xx++ )
-        {
-            if( test( xx + x, yy + y ) )
-                img.setPixel( xx, yy, 0 );
-        }
-    }
-    return img;
-}
 #else
 Bitmap::Bitmap(quint16* array, quint16 wordLen, quint16 pixWidth, quint16 pixHeight)
 {
@@ -765,24 +698,42 @@ Bitmap::Bitmap(quint16* array, quint16 wordLen, quint16 pixWidth, quint16 pixHei
     Q_ASSERT( d_wordWidth * d_pixHeight == d_wordLen );
 }
 
-QImage Bitmap::toImage() const
+void Bitmap::toImage(QImage& img, QRect area) const
 {
     if( isNull() )
-        return QImage();
-    QImage img( d_pixWidth, d_pixHeight, QImage::Format_Mono );
-    for( int y = 0; y < d_pixHeight; y++ )
+        return;
+    Q_ASSERT( img.format() == QImage::Format_RGB32 && img.width() == d_pixWidth && img.height() == d_pixHeight );
+    // more efficient than Mono because the Qt pipeline has to convert it otherwise
+
+    if( area.isNull() )
+        area = img.rect();
+    else
     {
-        uchar* dest = img.scanLine(y);
-        quint16* line = d_buf + y * d_wordWidth;
-        for( int x = 0; x < d_wordWidth; x++ )
-        {
-            const quint16 src = ~line[x];
-            const int bx = x << 1;
-            dest[bx] = src >> 8;
-            dest[bx+1] = src & 0xff;
-        }
+        Q_ASSERT( area.x() > 0 && ( area.x() + area.width() ) < d_pixWidth );
+        Q_ASSERT( area.y() > 0 && ( area.y() + area.height() ) < d_pixHeight );
     }
-    return img;
+
+    const int sw = d_wordWidth;
+    const int dw = img.bytesPerLine();
+    const quint16 *src_data = d_buf; // quint16 statt uchar
+    uchar *dest_data = img.bits();
+    const int ax = area.x();
+    const int aw = area.width();
+    const int axaw = ax + aw;
+    const int ah = area.height();
+    const int ay = area.y();
+
+    src_data += sw * ay;
+    dest_data += dw * ay;
+    for( int y = 0; y < ah; y++ )
+    {
+        uint*p = (uint*)dest_data;
+        p += ax;
+        for( int x = ax; x < axaw; x++ )
+            *p++ = ((src_data[x>>4] >> (15 - (x & 15))) & 1) ? 0xff000000 : 0xffffffff; // 15 statt 7
+        src_data += sw;
+        dest_data += dw;
+    }
 }
 #endif
 

@@ -33,7 +33,7 @@ class Bitmap
 public:
     Bitmap():d_buf(0),d_wordLen(0) {}
     Bitmap( quint16* array, quint16 wordLen, quint16 pixWidth, quint16 pixHeight );
-    QImage toImage() const;
+    void toImage(QImage&, QRect = QRect()) const;
     quint16 width() const { return d_pixWidth; }
     quint16 height() const { return d_pixHeight; }
     quint16 wordLen() const { return d_wordLen; }
@@ -52,13 +52,6 @@ public:
         Q_ASSERT( i < d_wordLen );
         d_buf[i] = v;
     }
-    inline bool bitAt(quint16 x, quint16 y) const
-    {
-        quint16* line = d_buf + y * d_wordWidth;
-        const quint8 bitpos = 15 - x % 16 ;
-        const quint16 pat = 1 << bitpos;
-        return ( line[x>>4] & pat ) > 0;
-    }
 private:
     quint16 d_pixWidth, d_pixHeight, d_wordLen, d_wordWidth;
     quint16* d_buf;
@@ -74,25 +67,6 @@ private:
         {
             return d_buf + ( y * d_pixLineWidth / PixPerByte );
         }
-        inline bool test(quint16 x, quint16 y) const
-        {
-            const int bytePos = ( y * d_pixLineWidth + x ) / PixPerByte;
-            const quint8 bitpos = 7 - x % 8 ;
-            const quint8 pat = 1 << bitpos;
-            Q_ASSERT( bytePos < d_wordLen * 2 );
-            return ( d_buf[bytePos] & pat ) > 0;
-        }
-        inline void set(quint16 x, quint16 y, bool on) const
-        {
-            const int bytePos = ( y * d_pixLineWidth + x ) / PixPerByte;
-            const quint8 bitpos = 7 - x % 8 ;
-            const quint8 pat = 1 << bitpos;
-            Q_ASSERT( bytePos < d_wordLen * 2 );
-            if( on )
-                d_buf[bytePos] |= pat;
-            else
-                d_buf[bytePos] &= ~pat;
-        }
         quint16 lineWidth() const { return d_pixLineWidth; }
         quint16 width() const { return d_pixWidth; }
         quint16 height() const { return d_pixHeight; }
@@ -106,8 +80,7 @@ private:
         void wordAtPut( quint16 i, quint16 v );
         bool isNull() const { return d_buf == 0; }
         bool isSameBuffer( const Bitmap& rhs ) const { return rhs.d_buf == d_buf; }
-        QImage toImage() const;
-        QImage toImage(quint16 x, quint16 y, quint16 w, quint16 h) const;
+        void toImage(QImage&, QRect = QRect()) const;
     protected:
         static inline quint16 readU16( const quint8* data, int off )
         {
@@ -176,7 +149,6 @@ private:
         void keyPressEvent(QKeyEvent* event);
         void keyReleaseEvent(QKeyEvent* event);
         void inputMethodEvent(QInputMethodEvent *);
-        void updateScreenBitmap( const QRect& );
         QString renderTitle() const;
         bool postEvent(EventType, quint16 param = 0 , bool withTime = true);
         bool keyEvent( int keyCode, char ch, bool down );
