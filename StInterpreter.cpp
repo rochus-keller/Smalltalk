@@ -30,7 +30,7 @@
 using namespace St;
 
 //#define ST_DO_TRACING
-#define ST_DO_TRACE2
+//#define ST_DO_TRACE2
 #define ST_TRACE3_PRIMITIVES
 #define ST_TRACE_SYSTEM_ERRORS
 //#define ST_DO_SCREEN_RECORDING
@@ -1099,8 +1099,8 @@ void Interpreter::returnValue(Interpreter::OOP resultPointer, Interpreter::OOP c
     ST_TRACE_BYTECODE("result:" << memory->prettyValue(resultPointer).constData()
                       << "context:" << memory->prettyValue(contextPointer).constData() );
 
-    ST_RETURN_BYTECODE(memory->prettyValue(resultPointer).constData() << "from" <<
-                       memory->prettyValue(activeContext).constData());
+    //ST_RETURN_BYTECODE(memory->prettyValue(resultPointer).constData() << "from" <<
+    //                   memory->prettyValue(activeContext).constData());
 
 #ifdef ST_DO_TRACING
     if( memory->fetchClassOf(activeContext) != ObjectMemory2::classBlockContext )

@@ -103,6 +103,7 @@ void Display::setBitmap(const Bitmap& buf)
 {
     d_bitmap = buf;
     d_screen = d_bitmap.toImage();
+    d_updateArea = QRect();
     setFixedSize( buf.width(), buf.height() );
     update();
 }
@@ -140,50 +141,7 @@ void Display::drawRecord(int x, int y, int w, int h)
 
 void Display::updateArea(const QRect& r )
 {
-#ifndef ST_DISPLAY_WORDARRY
-    const int w = r.width();
-    const int h = r.height();
-    if( w > d_bitmap.width() / 2 && h > d_bitmap.height() / 2 )
-    {
-        // full area
-
-        // using QImage is much faster than drawing single points with QPainter, but still rather slow as it seems
-        const int lw = d_bitmap.lineWidth() / 8;
-        for( int y = 0; y < d_bitmap.height(); y++ )
-        {
-            uchar* dest = d_screen.scanLine(y);
-            const quint8* src = d_bitmap.scanLine(y);
-            for( int x = 0; x < lw; x++ )
-                dest[x] = ~src[x];
-            //memcpy( dest, src, lw );
-        }
-    }else
-    {
-        // part of the area
-        const int y = r.y();
-        const int x = r.x();
-        for( int _y = 0; _y < h; _y++ )
-        {
-            for( int _x = 0; _x < w; _x++ )
-                d_screen.setPixel(_x+x,_y+y, d_bitmap.test(_x+x,_y+y) ? blackPixel : whitePixel );
-        }
-    }
-#else
-    const int w = r.width();
-    const int h = r.height();
-    if( w > d_bitmap.width() / 3 && h > d_bitmap.height() / 3 )
-        d_screen = d_bitmap.toImage();
-    else
-    {
-        const int y = r.y();
-        const int x = r.x();
-        for( int _y = 0; _y < h; _y++ )
-        {
-            for( int _x = 0; _x < w; _x++ )
-                d_screen.setPixel(_x+x,_y+y, d_bitmap.bitAt(_x+x,_y+y) ? blackPixel : whitePixel );
-        }
-    }
-#endif
+    d_updateArea |= r;
 
     update( r );
 }
@@ -251,7 +209,19 @@ void Display::paintEvent(QPaintEvent* event)
 {
     if( d_bitmap.isNull() )
         return;
+
+    const QRect r = event->rect();
+    if( r.isNull() )
+        return;
+
+    if( !d_updateArea.isNull() )
+    {
+        updateScreenBitmap(d_updateArea);
+        d_updateArea = QRect();
+    }
+
     QPainter p(this);
+    p.setRenderHints( QPainter::Antialiasing | QPainter::TextAntialiasing | QPainter::SmoothPixmapTransform, false );
 
 #if 0 // draw cursor ourselves
     //d_img.invertPixels();
@@ -280,13 +250,12 @@ void Display::paintEvent(QPaintEvent* event)
     }
 #endif
 
-    const QRect r = event->rect();
     p.drawImage( r,d_screen, r);
 }
 
 void Display::timerEvent(QTimerEvent*)
 {
-    update();
+    // update();
 }
 
 void Display::closeEvent(QCloseEvent* event)
@@ -409,6 +378,57 @@ void Display::inputMethodEvent(QInputMethodEvent* event)
         keyEvent( 0, ch, true );
         keyEvent( 0, ch, false );
     }
+}
+
+void Display::updateScreenBitmap(const QRect& r)
+{
+#ifndef ST_DISPLAY_WORDARRY
+    const int w = r.width();
+    const int h = r.height();
+    if( w > d_bitmap.width() / 3 && h > d_bitmap.height() / 3 )
+    {
+        // full area
+
+        // using QImage is much faster than drawing single points with QPainter, but still rather slow as it seems
+        d_screen = d_bitmap.toImage();
+#if 0
+        const int lw = d_bitmap.lineWidth() / 8;
+        for( int y = 0; y < d_bitmap.height(); y++ )
+        {
+            uchar* dest = d_screen.scanLine(y);
+            const quint8* src = d_bitmap.scanLine(y);
+            for( int x = 0; x < lw; x++ )
+                dest[x] = ~src[x];
+            //memcpy( dest, src, lw );
+        }
+#endif
+    }else
+    {
+        // part of the area
+        const int y = r.y();
+        const int x = r.x();
+        for( int _y = 0; _y < h; _y++ )
+        {
+            for( int _x = 0; _x < w; _x++ )
+                d_screen.setPixel(_x+x,_y+y, d_bitmap.test(_x+x,_y+y) ? blackPixel : whitePixel );
+        }
+    }
+#else
+    const int w = r.width();
+    const int h = r.height();
+    if( w > d_bitmap.width() / 3 && h > d_bitmap.height() / 3 )
+        d_screen = d_bitmap.toImage();
+    else
+    {
+        const int y = r.y();
+        const int x = r.x();
+        for( int _y = 0; _y < h; _y++ )
+        {
+            for( int _x = 0; _x < w; _x++ )
+                d_screen.setPixel(_x+x,_y+y, d_bitmap.bitAt(_x+x,_y+y) ? blackPixel : whitePixel );
+        }
+    }
+#endif
 }
 
 QString Display::renderTitle() const
@@ -685,6 +705,7 @@ QImage Bitmap::toImage() const
 {
     if( isNull() )
         return QImage();
+#if 1
     QImage img( width(), height(), QImage::Format_Mono );
     const int lw = lineWidth() / 8;
     for( int y = 0; y < height(); y++ )
@@ -694,6 +715,25 @@ QImage Bitmap::toImage() const
         for( int x = 0; x < lw; x++ )
             dest[x] = ~src[x];
     }
+#else
+    // not actually faster
+    QImage img( width(), height(), QImage::Format_RGB32 );
+    // more efficient than Mono because the Qt pipeline has to convert it otherwise
+    const int lw = lineWidth() / 8;
+    for( int y = 0; y < height(); y++ )
+    {
+        quint32* dest = (quint32*)img.scanLine(y); // 0xffRRGGBB
+        const quint8* src = scanLine(y);
+        int pix = 0;
+        for( int x = 0; x < lw; x++ )
+        {
+            const quint8 byte = src[x];
+            for( int bit = 0; bit < 8; bit++ )
+                dest[pix+bit] = byte & ( 1 << ( 7 - bit ) ) ? 0xff000000 : 0xffffffff;
+            pix += 8;
+        }
+    }
+#endif
     return img;
 }
 
@@ -823,6 +863,8 @@ void BitBlt::computeMasks()
     destRaster = ( ( destBits->width() - 1 ) / 16 ) + 1;
     if( sourceBits != 0 )
         sourceRaster = ( ( sourceBits->width() - 1 ) / 16 ) + 1;
+    else
+        sourceRaster = 0;
     // halftoneBits = halftoneForm bits
     skew = ( sx - dx ) & 15;
     const quint16 startBits = 16 - ( dx & 15 );

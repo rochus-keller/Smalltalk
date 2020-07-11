@@ -176,6 +176,7 @@ private:
         void keyPressEvent(QKeyEvent* event);
         void keyReleaseEvent(QKeyEvent* event);
         void inputMethodEvent(QInputMethodEvent *);
+        void updateScreenBitmap( const QRect& );
         QString renderTitle() const;
         bool postEvent(EventType, quint16 param = 0 , bool withTime = true);
         bool keyEvent( int keyCode, char ch, bool down );
@@ -193,6 +194,7 @@ private:
         QElapsedTimer d_elapsed;
         QImage d_record;
         EventCallback d_eventCb;
+        QRect d_updateArea;
         bool d_shiftDown, d_capsLockDown, d_recOn, d_forceClose;
     };
 
