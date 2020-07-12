@@ -21,7 +21,6 @@
 #include "StInterpreter.h"
 #include "StImageViewer.h"
 #include <QtDebug>
-#include <QApplication>
 #include <math.h>
 #include <QDateTime> 
 #include <QPainter>
@@ -135,7 +134,7 @@ void Interpreter::interpret()
     while( Display::s_run ) // && cycleNr < 121000 ) // trace2 < 500 trace3 < 2000
     {
         cycle();
-        qApp->processEvents();
+        Display::processEvents();
         if( Display::s_break )
             onBreak();
     }

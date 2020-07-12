@@ -152,6 +152,19 @@ void Display::setLog(bool on)
         onLog();
 }
 
+void Display::processEvents()
+{
+    static quint32 last = 0;
+
+    Display* d = Display::inst();
+    const quint32 cur = d->d_elapsed.elapsed();
+    if( ( cur - last ) >= 30 )
+    {
+        last = cur;
+        QApplication::processEvents();
+    }
+}
+
 void Display::onRecord()
 {
     if( !d_recOn )

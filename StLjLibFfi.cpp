@@ -28,7 +28,6 @@
 #include "StDisplay.h"
 #include "StLjObjectMemory.h"
 #include <LjTools/Engine2.h>
-#include <QCoreApplication>
 #include <QMessageBox>
 #include <QtDebug>
 
@@ -127,7 +126,7 @@ DllExport void St_start()
 
 DllExport void St_processEvents()
 {
-    QCoreApplication::processEvents();
+    St::Display::processEvents();
 }
 
 DllExport int St_extractBits(int from, int to, int word)

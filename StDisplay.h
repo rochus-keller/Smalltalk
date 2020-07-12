@@ -128,6 +128,7 @@ private:
         void updateArea(const QRect& r);
         void setLog(bool on);
         void setEventCallback( EventCallback cb ) { d_eventCb = cb; }
+        static void processEvents();
     signals:
         void sigEventQueue();
 
