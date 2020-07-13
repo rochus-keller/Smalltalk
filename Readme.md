@@ -86,7 +86,7 @@ Note that you can press CTRL+left mouse button to simulate a right mouse button 
 All keys on the Alto keyboard (see e.g. https://www.extremetech.com/wp-content/uploads/2011/10/Alto_Mouse_c.jpg) besides LF are supported; just type the key combination for the expected symbol on your local keyboard. Use the left and up arrow keys to enter a left and up arrow character.
 
 The VM supports some debugging features. If you press ALT+B the interpreter breaks and the Image Viewer is shown with the current state of the object memory and the interpreter registers. The currently active process is automatically selected and the current call chain is shown. When the Image Viewer is open you can press F5 (or close the viewer) to continue, or press F10 to execute the next bytecode and show the Image Viewer again. There are also some other shortcuts for logging (ALT+L) and screen update recording (ALT+R), but these only work if the corresponding functions are enabled when compiling the source code (see ST_DO_TRACING and ST_DO_SCREEN_RECORDING).
-If you press ALT+V, the text on the clipboard is sent to the VM as keystrokes; only characters with a corresponding Alto key combination are considered.
+If you press ALT+V, the text on the clipboard is sent to the VM as keystrokes; only characters with a corresponding Alto key combination are considered. Conversely, you can transfer text located on the clipboard of the VM to the clipboard of the host OS by pressing ALT+C.
 
 
 Here is a screenshot of the running VM after some interactions:
@@ -111,7 +111,7 @@ After further analysis and tests I was able to achieve a considerable performanc
 
 Since the whole interpreter is written in Lua which runs on LuaJIT the approach could be seen as a "meta-tracing JIT" (i.e. the tracing JIT directly effects the language interpreter, and only indirectly the user program running on it). But there is no speedup yet comparable to e.g. RPython where the JIT version of the VM runs four times faster than the C based interpreter. I will investigate this point further and consider ways to replace the interpreter with a translator from Bluebook directly into LuaJIT bytecode. For now, the approach can be used for representative performance comparisons between LuaJIT and C++ based on a sufficiently complex and realistic application (as opposed to micro benchmarks). 
 
-The VM supports the ALT+V shortcut (but not the other shortcuts supported by the C++ version). 
+The VM supports the ALT+V and ALT+C shortcuts (but not the other shortcuts supported by the C++ version). 
 
 The VM integrates a Lua IDE with source-level debugger (see https://github.com/rochus-keller/LjTools#lua-parser-and-ide-features); the IDE can be enabled by the -ide or -pro command line option.
 

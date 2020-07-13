@@ -257,6 +257,10 @@ bool LjObjectMemory::readFrom(QIODevice* in)
     Q_ASSERT( !lua_isnil( L, -1 ) );
     lua_setfield( L, knownObjects, "False" );
 
+    lua_rawgeti( L, objectTable, oopToLuaIndex(0x2392) ); // ParagraphEditor.CurrentSelection
+    Q_ASSERT( !lua_isnil( L, -1 ) );
+    lua_setfield( L, knownObjects, "CurrentSelection" );
+
     lua_pushnumber(L,0.0);
     lua_rawgeti( L, objectTable, oopToLuaIndex(classSmallInteger) );
     Q_ASSERT( !lua_isnil( L, -1 ) );

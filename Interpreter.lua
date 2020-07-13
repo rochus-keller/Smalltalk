@@ -74,13 +74,14 @@ ffi.cdef[[
                           int destX, int destY, int width, int height,
                           int sourceX, int sourceY,
                           int clipX, int clipY, int clipWidth, int clipHeight );
-    void St_timeWords( ByteArray* ba );
-    void St_tickWords( ByteArray* ba );
-    void St_wakeupOn( ByteArray* ba );
+    void St_timeWords( ByteArray* );
+    void St_tickWords( ByteArray* );
+    void St_wakeupOn( ByteArray* );
     int St_itsTime();
     void St_update( WordArray* destBits,
                           int destX, int destY, int width, int height,
                           int clipX, int clipY, int clipWidth, int clipHeight );
+    void St_copyToClipboard( ByteArray* );
 ]]
 
 ------------------ Module Data ------------------------------------------
@@ -913,18 +914,21 @@ end
 
 local function cycle()
 	local pending = C.St_pendingEvents()
-	for i=1,pending do
-		-- asynchronousSignal(inputSemaphore) inlined
-		if inputSemaphore then
-			semaphoreIndex = semaphoreIndex + 1
-			semaphoreList[semaphoreIndex] = inputSemaphore
-		end
-	end
-	pending = C.St_itsTime()
 	if pending > 0 then
+		for i=1,pending do
+			-- asynchronousSignal(inputSemaphore) inlined
+			if inputSemaphore then
+				semaphoreIndex = semaphoreIndex + 1
+				semaphoreList[semaphoreIndex] = inputSemaphore
+			end
+		end
+	elseif pending == -1 then
 		-- asynchronousSignal(toSignal) inlined
 		semaphoreIndex = semaphoreIndex + 1
 		semaphoreList[semaphoreIndex] = toSignal
+	elseif pending == -2 then
+		local str = memory.knownObjects.CurrentSelection[1][0]
+		C.St_copyToClipboard(str.data)
 	end
     checkProcessSwitch() 
 	currentBytecode = fetchByte()

@@ -85,6 +85,7 @@ namespace St
             classLargeNegativeInteger = 0x1da0,
             classProcess = 0x7a4,
             classAssociation = 0x84,
+            currentSelection = 0x2392, // ParagraphEditor.CurrentSelection
         };
 
         enum CompiledMethodFlags {

@@ -220,8 +220,39 @@ DllExport const char* St_toString( ByteArray* ba )
     return str;
 }
 
+static quint32 s_wakeup = 0;
+
+DllExport void St_wakeupOn( ByteArray* ba )
+{
+    Q_ASSERT( ba->count == 4 );
+    s_wakeup =  ( ba->data[3] << 24 ) |
+    ( ba->data[3] << 16 ) |
+    ( ba->data[1] << 8 ) |
+    ba->data[0];
+}
+
+DllExport int St_itsTime()
+{
+    if( s_wakeup == 0 )
+        return 0;
+    quint32 ticks = St::Display::inst()->getTicks();
+    if( ticks >= s_wakeup )
+    {
+        s_wakeup = 0;
+        return 1;
+    }else
+        return 0;
+}
+
 DllExport int St_pendingEvents()
 {
+    if( St_itsTime() )
+        return -1;
+    if( St::Display::s_copy )
+    {
+        St::Display::s_copy = false;
+        return -2;
+    }
     const int res = s_pendingEvents;
     s_pendingEvents = 0;
     return res;
@@ -346,28 +377,10 @@ DllExport void St_tickWords( ByteArray* ba )
         ba->data[i] = ( ticks >> ( i * 8 ) ) & 0xff;
 }
 
-static quint32 s_wakeup = 0;
-
-DllExport void St_wakeupOn( ByteArray* ba )
+DllExport void St_copyToClipboard( ByteArray* ba )
 {
-    Q_ASSERT( ba->count == 4 );
-    s_wakeup =  ( ba->data[3] << 24 ) |
-    ( ba->data[3] << 16 ) |
-    ( ba->data[1] << 8 ) |
-    ba->data[0];
-}
-
-DllExport int St_itsTime()
-{
-    if( s_wakeup == 0 )
-        return 0;
-    quint32 ticks = St::Display::inst()->getTicks();
-    if( ticks >= s_wakeup )
-    {
-        s_wakeup = 0;
-        return 1;
-    }else
-        return 0;
+    if( ba )
+        St::Display::copyToClipboard( QByteArray::fromRawData( (char*)ba->data, ba->count ) );
 }
 
 }

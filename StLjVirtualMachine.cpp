@@ -104,7 +104,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk-80 on LuaJIT");
-    a.setApplicationVersion("0.5.5");
+    a.setApplicationVersion("0.5.6");
     a.setStyle("Fusion");
 
     QString imagePath;

@@ -114,6 +114,7 @@ private:
         static void forceClose();
         static bool s_run;
         static bool s_break;
+        static bool s_copy;
 
         void setBitmap( const Bitmap& );
         const Bitmap& getBitmap() const { return d_bitmap; }
@@ -129,6 +130,7 @@ private:
         void setLog(bool on);
         void setEventCallback( EventCallback cb ) { d_eventCb = cb; }
         static void processEvents();
+        static void copyToClipboard( const QByteArray& );
     signals:
         void sigEventQueue();
 
@@ -138,6 +140,7 @@ private:
         void onLog();
         void onBreak();
         void onPaste();
+        void onCopy();
 
     protected:
         void paintEvent(QPaintEvent *);

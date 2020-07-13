@@ -35,6 +35,7 @@ using namespace St;
 static Display* s_inst = 0;
 bool Display::s_run = true;
 bool Display::s_break = false;
+bool Display::s_copy = false;
 static const int s_msPerFrame = 30; // 20ms according to BB
 enum { whitePixel = 1, blackPixel = 0 };
 static QFile s_out("st.log");
@@ -73,6 +74,7 @@ Display::Display(QWidget *parent) : QWidget(parent),d_curX(-1),d_curY(-1),d_caps
     s_oldHandler = qInstallMessageHandler(messageHander);
 #endif
     new QShortcut(tr("ALT+V"), this, SLOT(onPaste()) );
+    new QShortcut(tr("ALT+C"), this, SLOT(onCopy()) );
 }
 
 Display::~Display()
@@ -165,6 +167,13 @@ void Display::processEvents()
     }
 }
 
+void Display::copyToClipboard(const QByteArray& str)
+{
+    QString text = QString::fromUtf8(str);
+    text.replace( '\r', '\n' );
+    QApplication::clipboard()->setText( text );
+}
+
 void Display::onRecord()
 {
     if( !d_recOn )
@@ -214,6 +223,11 @@ void Display::onPaste()
     {
         simulateKeyEvent(text[i]);
     }
+}
+
+void Display::onCopy()
+{
+    s_copy = true;
 }
 
 void Display::paintEvent(QPaintEvent* event)
@@ -722,8 +736,8 @@ void Bitmap::toImage(QImage& img, QRect area) const
         area = img.rect();
     else
     {
-        Q_ASSERT( area.x() > 0 && ( area.x() + area.width() ) < d_pixWidth );
-        Q_ASSERT( area.y() > 0 && ( area.y() + area.height() ) < d_pixHeight );
+        Q_ASSERT( area.x() >= 0 && ( area.x() + area.width() ) <= d_pixWidth );
+        Q_ASSERT( area.y() >= 0 && ( area.y() + area.height() ) <= d_pixHeight );
     }
 
     const int sw = d_wordWidth;

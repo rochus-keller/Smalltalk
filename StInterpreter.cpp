@@ -396,6 +396,20 @@ quint8 Interpreter::fetchByte()
 
 void Interpreter::cycle()
 {
+    // not in BB:
+    if( Display::s_copy )
+    {
+        Display::s_copy = false;
+        OOP text = memory->fetchPointerOfObject(1, ObjectMemory2::currentSelection );
+        if( text != ObjectMemory2::objectNil )
+        {
+            OOP string = memory->fetchPointerOfObject(0, text );
+            if( string != ObjectMemory2::objectNil )
+                Display::copyToClipboard( memory->fetchByteArray(string) );
+        }
+    }
+    // end not in BB
+
     checkProcessSwitch();
     currentBytecode = fetchByte();
     cycleNr++;
