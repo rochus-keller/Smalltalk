@@ -141,6 +141,7 @@ private:
         void onBreak();
         void onPaste();
         void onCopy();
+        void onPasteBenchmark();
 
     protected:
         void paintEvent(QPaintEvent *);

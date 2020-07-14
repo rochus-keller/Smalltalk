@@ -74,6 +74,7 @@ Display::Display(QWidget *parent) : QWidget(parent),d_curX(-1),d_curY(-1),d_caps
     s_oldHandler = qInstallMessageHandler(messageHander);
 #endif
     new QShortcut(tr("ALT+V"), this, SLOT(onPaste()) );
+    new QShortcut(tr("ALT+SHIFT+V"), this, SLOT(onPasteBenchmark()) );
     new QShortcut(tr("ALT+C"), this, SLOT(onCopy()) );
 }
 
@@ -157,14 +158,20 @@ void Display::setLog(bool on)
 void Display::processEvents()
 {
     static quint32 last = 0;
+    static quint32 count = 0;
 
-    Display* d = Display::inst();
-    const quint32 cur = d->d_elapsed.elapsed();
-    if( ( cur - last ) >= 30 )
+    if( count > 4000 )
     {
-        last = cur;
-        QApplication::processEvents();
-    }
+        count = 0;
+        Display* d = Display::inst();
+        const quint32 cur = d->d_elapsed.elapsed();
+        if( ( cur - last ) >= 30 )
+        {
+            last = cur;
+            QApplication::processEvents();
+        }
+    }else
+        count++;
 }
 
 void Display::copyToClipboard(const QByteArray& str)
@@ -228,6 +235,19 @@ void Display::onPaste()
 void Display::onCopy()
 {
     s_copy = true;
+}
+
+void Display::onPasteBenchmark()
+{
+    QFile in(":/benchmark/Benchmark.st");
+    if( in.open(QIODevice::ReadOnly) )
+    {
+        const QByteArray text = in.readAll();
+        for( int i = 0; i < text.size(); i++ )
+        {
+            simulateKeyEvent(text[i]);
+        }
+    }
 }
 
 void Display::paintEvent(QPaintEvent* event)

@@ -5,5 +5,6 @@
         <file>images/close.png</file>
         <file>images/exclamation-circle.png</file>
         <file>images/exclamation-red.png</file>
+        <file>benchmark/Benchmark.st</file>
     </qresource>
 </RCC>
