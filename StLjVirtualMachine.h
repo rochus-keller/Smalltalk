@@ -35,7 +35,7 @@ namespace St
     public:
         explicit LjVirtualMachine(QObject *parent = 0);
         bool load( const QString& path );
-        void run();
+        void run(bool useJit = true, bool useProfiler = false);
         Lua::Engine2* getLua() const { return d_lua; }
     protected slots:
         void onNotify( int messageType, QByteArray val1, int val2 );

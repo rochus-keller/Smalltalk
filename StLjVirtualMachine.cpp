@@ -23,11 +23,14 @@
 #include <LjTools/Engine2.h>
 #include <LjTools/LuaIde.h>
 #include <LjTools/LuaProject.h>
+#include <LuaJIT/src/lua.hpp>
 #include <QApplication>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QFormLayout>
 #include <QtDebug>
 #include <lua.hpp>
+#include <QPainter>
 using namespace St;
 using namespace Lua;
 
@@ -45,6 +48,126 @@ static int toaddress(lua_State * L)
     return 1;
 }
 
+#if LUAJIT_VERSION_NUM >= 20100
+#define ST_USE_MONITOR
+#endif
+
+#ifdef ST_USE_MONITOR
+#ifdef ST_USE_MONITOR_GUI
+class JitMonitor : public QWidget
+{
+public:
+    class Gauge : public QWidget
+    {
+    public:
+        Gauge( QWidget* p):QWidget(p),d_val(0){ setMinimumWidth(100);}
+        quint32 d_val;
+        void paintEvent(QPaintEvent *)
+        {
+            QPainter p(this);
+            p.fillRect(0,0, width() / 100 * d_val, height(),Qt::red);
+            p.drawText(rect(), Qt::AlignCenter, QString("%1%").arg(d_val));
+        }
+    };
+
+    enum Bar { Compiled, Interpreted, C, GC, Compiler, MAX };
+    quint32 d_state[MAX];
+    quint32 d_count;
+    Gauge* d_bars[MAX];
+    JitMonitor():d_count(1)
+    {
+        QFormLayout* vb = new QFormLayout(this);
+        static const char* names[] = {
+            "Compiled:", "Interpreted:", "C Code:", "Garbage Collector:", "JIT Compiler:"
+        };
+        for( int i = 0; i < MAX; i++ )
+        {
+            d_bars[i] = new Gauge(this);
+            d_state[i] = 0;
+            vb->addRow(names[i],d_bars[i]);
+        }
+    }
+};
+static JitMonitor* s_jitMonitor = 0;
+
+static void profile_callback(void *data, lua_State *L, int samples, int vmstate)
+{
+    if( s_jitMonitor == 0 )
+        s_jitMonitor = new JitMonitor();
+    switch( vmstate )
+    {
+    case 'N':
+        vmstate = JitMonitor::Compiled;
+        break;
+    case 'I':
+        vmstate = JitMonitor::Interpreted;
+        break;
+    case 'C':
+        vmstate = JitMonitor::C;
+        break;
+    case 'G':
+        vmstate = JitMonitor::GC;
+        break;
+    case 'J':
+        vmstate = JitMonitor::Compiler;
+        break;
+    default:
+        qCritical() << "profile_callback: unknown vmstate" << vmstate;
+        return;
+    }
+    JitMonitor* m = s_jitMonitor;
+    m->d_count += samples;
+    m->d_state[vmstate] += samples;
+    m->d_bars[vmstate]->d_val = m->d_state[vmstate] / double(m->d_count) * 100.0 + 0.5;
+    m->d_bars[vmstate]->update();
+    m->show();
+    // qDebug() << "profile_callback" << Display::inst()->getTicks() << samples << vmstate << (char)vmstate;
+}
+#else
+
+static inline int percent( double a, double b )
+{
+    return a / b * 100 + 0.5;
+}
+
+static void profile_callback(void *data, lua_State *L, int samples, int vmstate)
+{
+    static quint32 compiled = 0, interpreted = 0, ccode = 0, gc = 0, compiler = 0, count = 1, lag = 0;
+    count += samples;
+    switch( vmstate )
+    {
+    case 'N':
+        compiled += samples;
+        break;
+    case 'I':
+        interpreted += samples;
+        break;
+    case 'C':
+        ccode += samples;
+        break;
+    case 'G':
+        gc += samples;
+        break;
+    case 'J':
+        compiler += samples; // never seen so far
+        break;
+    default:
+        qCritical() << "profile_callback: unknown vmstate" << vmstate;
+        return;
+    }
+    lag++;
+    if( lag >= 0 ) // adjust to luaJIT_profile_start i parameter
+    {
+        lag = 0;
+
+        qDebug() << "profile_callback" << percent(compiled,count) << percent(interpreted,count) <<
+                    percent(ccode,count) << percent(gc,count) <<
+                    percent(compiler,count) << "time:" << St::Display::inst()->getTicks();
+    }
+}
+#endif
+#endif
+
 LjVirtualMachine::LjVirtualMachine(QObject* parent) : QObject(parent)
 {
     d_lua = new Engine2(this);
@@ -60,7 +183,6 @@ LjVirtualMachine::LjVirtualMachine(QObject* parent) : QObject(parent)
 
     lua_pushcfunction( d_lua->getCtx(), toaddress );
     lua_setglobal( d_lua->getCtx(), "toaddress" );
-
 }
 
 bool LjVirtualMachine::load(const QString& path)
@@ -70,8 +192,15 @@ bool LjVirtualMachine::load(const QString& path)
     return true;
 }
 
-void LjVirtualMachine::run()
+void LjVirtualMachine::run(bool useJit, bool useProfiler)
 {
+#ifdef ST_USE_MONITOR
+    if( useProfiler )
+        luaJIT_profile_start( d_lua->getCtx(), "i1000", profile_callback, 0);
+#endif
+    if( !useJit )
+        luaJIT_setmode( d_lua->getCtx(), LUAJIT_MODE_ENGINE, LUAJIT_MODE_OFF );
+
     loadLuaLib( d_lua, "ObjectMemory");
     loadLuaLib( d_lua, "Interpreter");
 
@@ -104,12 +233,14 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk-80 on LuaJIT");
-    a.setApplicationVersion("0.6.0");
+    a.setApplicationVersion("0.6.1");
     a.setStyle("Fusion");
 
     QString imagePath;
     QString proFile;
     bool ide = false;
+    bool useProfiler = false;
+    bool useJit = true;
     const QStringList args = QCoreApplication::arguments();
     for( int i = 1; i < args.size(); i++ ) // arg 0 enthaelt Anwendungspfad
     {
@@ -122,10 +253,16 @@ int main(int argc, char *argv[])
             out << "options:" << endl;
             out << "  -ide      start Lua IDE" << endl;
             out << "  -pro file open given project in LuaIDE" << endl;
+            out << "  -nojit    switch off JIT" << endl;
+            out << "  -stats    use LuaJIT profiler (if present)" << endl;
             out << "  -h        display this information" << endl;
             return 0;
         }else if( args[i] == "-ide" )
             ide = true;
+        else if( args[i] == "-nojit" )
+                    useJit = false;
+        else if( args[i] == "-stats" )
+                    useProfiler = true;
         else if( args[i] == "-pro" )
         {
             ide = true;
@@ -175,7 +312,7 @@ int main(int argc, char *argv[])
         a.exec();
     }else
     {
-        vm.run();
+        vm.run(useJit,useProfiler);
         return 0;
     }
 }
