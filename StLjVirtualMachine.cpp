@@ -181,6 +181,18 @@ LjVirtualMachine::LjVirtualMachine(QObject* parent) : QObject(parent)
     d_lua->addLibrary(Engine2::FFI);
     d_lua->addLibrary(Engine2::OS);
 
+#ifdef ST_SET_JIT_PARAMS_BY_LUA
+    // works in principle, but the JIT runs about 5% slower than when directly set via lj_jit.h
+    QByteArray cmd = "jit.opt.start(";
+    cmd += "\"maxtrace=100000\",";
+    cmd += "\"maxrecord=40000\",";
+    cmd += "\"maxside=1000\",";
+    cmd += "\"sizemcode=64\",";
+    cmd += "\"maxmcode=4096\")";
+    if( !d_lua->executeCmd(cmd) )
+        qCritical() << "error initializing JIT:" << d_lua->getLastError();
+#endif
+
     lua_pushcfunction( d_lua->getCtx(), toaddress );
     lua_setglobal( d_lua->getCtx(), "toaddress" );
 }
