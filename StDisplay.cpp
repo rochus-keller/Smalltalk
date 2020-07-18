@@ -837,13 +837,17 @@ void BitBlt::clipRange()
     }
     if( ( dy + h ) > ( clipY + clipHeight ) )
         h = h - ( ( dy + h ) - ( clipY + clipHeight ) );
+
+    if( sourceBits == 0 )
+        return;
+
     if( sx < 0 )
     {
         dx = dx - sx;
         w = w + sx;
         sx = 0;
     }
-    if( sourceBits != 0 && ( sx + w ) > sourceBits->width() )
+    if( ( sx + w ) > sourceBits->width() )
         w = w - ( sx + w - sourceBits->width() );
     if( sy < 0 )
     {
@@ -851,8 +855,9 @@ void BitBlt::clipRange()
         h = h + sy;
         sy = 0;
     }
-    if( sourceBits != 0 && ( sy + h ) > sourceBits->height() )
+    if( ( sy + h ) > sourceBits->height() )
         h = h - ( sy + h - sourceBits->height() );
+
 }
 
 void BitBlt::computeMasks()
@@ -885,10 +890,8 @@ void BitBlt::computeMasks()
 void BitBlt::checkOverlap()
 {
     hDir = vDir = 1;
-    if( sourceBits == destBits && dy >= sy )
+    if( sourceBits && destBits && sourceBits->isSameBuffer(*destBits) && dy >= sy )
     {
-        // is never executed
-#ifdef _USE_BB_IMP_
         if( dy > sy )
         {
             vDir = -1;
@@ -904,9 +907,6 @@ void BitBlt::checkOverlap()
             mask1 = mask2;
             mask2 = t;
         }
-#else
-        qWarning() << "WARINING: BitBlt::checkOverlap for sourceBits == destBits && dy >= sy not implemented";
-#endif
     }
 }
 

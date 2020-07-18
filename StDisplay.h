@@ -210,7 +210,8 @@ private:
         Bitmap* destBits;
         qint16 sourceRaster;
         qint16 destRaster;
-        qint16 skew, mask1, mask2, skewMask, nWords, vDir, hDir;
+        qint16 skew, nWords, vDir, hDir;
+        quint16 mask1, mask2, skewMask;
         qint16 sx, sy, dx, dy, w, h; // pixel
         qint16 sourceIndex, destIndex, sourceDelta, destDelta;
         bool preload;
