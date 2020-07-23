@@ -706,8 +706,8 @@ void Bitmap::toImage(QImage& img, QRect area) const
         area = img.rect();
     else
     {
-        Q_ASSERT( area.x() > 0 && ( area.x() + area.width() ) < d_pixWidth );
-        Q_ASSERT( area.y() > 0 && ( area.y() + area.height() ) < d_pixHeight );
+        Q_ASSERT( area.x() >= 0 && ( area.x() + area.width() ) <= d_pixWidth );
+        Q_ASSERT( area.y() >= 0 && ( area.y() + area.height() ) <= d_pixHeight );
     }
 
     const int sw = d_pixLineWidth / 8;

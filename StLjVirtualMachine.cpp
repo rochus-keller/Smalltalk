@@ -211,7 +211,7 @@ void LjVirtualMachine::run(bool useJit, bool useProfiler)
         luaJIT_profile_start( d_lua->getCtx(), "i1000", profile_callback, 0);
 #endif
     if( !useJit )
-        luaJIT_setmode( d_lua->getCtx(), LUAJIT_MODE_ENGINE, LUAJIT_MODE_OFF );
+        luaJIT_setmode( d_lua->getCtx(), 0, LUAJIT_MODE_ENGINE | LUAJIT_MODE_OFF );
 
     loadLuaLib( d_lua, "ObjectMemory");
     loadLuaLib( d_lua, "Interpreter");

@@ -29,7 +29,7 @@
 using namespace St;
 
 //#define ST_DO_TRACING
-//#define ST_DO_TRACE2
+#define ST_DO_TRACE2
 #define ST_TRACE3_PRIMITIVES
 #define ST_TRACE_SYSTEM_ERRORS
 //#define ST_DO_SCREEN_RECORDING
@@ -127,8 +127,15 @@ void Interpreter::interpret()
     //Display::inst()->setLog(true); // TEST
     newActiveContext( firstContext() ); // BB: When Smalltalk is started up, ...
 
-    // apparently the system is in ScreenController->startUp->controlLoop->controlActivity->yellowButtonActivity
-    //     ->quit->saveAs:thenQuit:->snapshotAs:thenQuit:
+    // apparently the system is in ScreenController ->startUp->controlLoop->controlActivity->yellowButtonActivity
+    //     SystenDictionary ->quit->saveAs:thenQuit:->snapshotAs:thenQuit:
+    /*                  justSnapped & quitIfTrue
+                            ifTrue:
+                                [self quitPrimitive] "last action in 1983"
+                            ifFalse:
+                                [Delay postSnapshot. "first action in 2020"
+                                DisplayScreen displayHeight: height.
+                                self install].*/
     // top: BlockContext->newProcess, ControllManager->activeController: SystemDictionary->install
 
     while( Display::s_run ) // && cycleNr < 121000 ) // trace2 < 500 trace3 < 2000
@@ -3004,11 +3011,10 @@ void Interpreter::primitiveSignalAtTick()
 void Interpreter::primitiveAltoFile()
 {
     // primitive 128
-
     // dumpStack_("primitiveAltoFile");
     /********** primitiveAltoFile argcount 5 begin stack:
     15 <a Semaphore>    semaphore:
-    14 <a ByteArray>    page: buffer
+    14 <a ByteArray>    page: buffer 528 bytes class ByteArray
     13 18512L           command: diskCommand -> #CCR
     12 4096             address: diskAddress // see AltoFileDirectory>>virtualToReal: 1->4096
     11 0                diskNumber
@@ -3018,7 +3024,23 @@ void Interpreter::primitiveAltoFile()
     7 <a AltoFilePage>
     ***** end stack */
 
-    BREAK();
+    // BREAK();
+
+    const OOP semaphore = popStack();
+    const OOP buffer = popStack();
+    const int command = positive16BitValueOf( popStack() );
+    const int address = positive16BitValueOf( popStack() );
+    const int diskNumber = positive16BitValueOf( popStack() );
+
+    ST_TRACE_PRIMITIVE("command:" << command << "address:" << address << "disk:" << diskNumber
+                       << "bufsize:" << memory->fetchByteLenghtOf(buffer) );
+
+    for( int i = 0; i < memory->fetchByteLenghtOf(buffer); i++ )
+        memory->storeByteOfObject(i,buffer,0);
+    asynchronousSignal(semaphore);
+
+    // push(buffer);
+
     /* called by
     // -1: AltoFile dskprim
     // 0: AltoFile doCommand:page:error:
