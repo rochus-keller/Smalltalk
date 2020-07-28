@@ -193,7 +193,7 @@ bool LjObjectMemory::readFrom(QIODevice* in)
             ObjectMemory::ByteString bs = om.methodBytecodes(oop);
             lua_pushvalue( L, createArrayFunction );
             lua_pushlightuserdata( L, (void*)bs.d_bytes );
-            lua_pushnumber( L, bs.d_len );
+            lua_pushnumber( L, bs.d_byteLen );
             lua_pushboolean( L, false );
             if( lua_pcall(L, 3, 1, 0 ) == 0 )
                 lua_rawset( L, luaObject );
@@ -226,9 +226,10 @@ bool LjObjectMemory::readFrom(QIODevice* in)
             ObjectMemory::ByteString bs = om.fetchByteString(oop);
             lua_pushvalue( L, createArrayFunction );
             lua_pushlightuserdata( L, (void*)bs.d_bytes );
-            lua_pushnumber( L, bs.d_len ); // byteLen
+            lua_pushnumber( L, bs.d_byteLen ); // byteLen
             lua_pushboolean( L, words );
-            if( lua_pcall(L, 3, 1, 0 ) == 0 )
+            lua_pushboolean( L, om.isBigEndian() );
+            if( lua_pcall(L, 4, 1, 0 ) == 0 )
                 lua_rawset( L, luaObject );
             else
                 lua_pop(L,2);

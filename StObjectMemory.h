@@ -30,6 +30,8 @@ namespace St
     class ObjectMemory : public QObject
     {
     public:
+        typedef quint16 OOP;
+
         // Objects known to the interpreter
         enum KnownObjects {
             // small integers
@@ -77,6 +79,9 @@ namespace St
             // extra knowns
             classSymbol = 0x38,
             classMethodDictionary = 0x4c,
+            classLargeNegativeInteger = 0x1da0,
+            classProcess = 0x7a4,
+            classAssociation = 0x84,
         };
 
         enum CompiledMethodFlags {
@@ -99,12 +104,15 @@ namespace St
         struct ByteString
         {
             const quint8* d_bytes;
-            quint16 d_len;
-            ByteString(const quint8* b, quint16 l):d_bytes(b),d_len(l){}
+            quint16 d_byteLen;
+            ByteString(const quint8* b, quint16 l):d_bytes(b),d_byteLen(l){}
         };
 
         ObjectMemory(QObject* p = 0);
         bool readFrom( QIODevice* );
+        void collectGarbage();
+        void updateRefs();
+        bool isBigEndian() const { return d_bigEndian; }
 
         QList<quint16> getAllValidOop() const;
         const QSet<quint16>& getObjects() const {return d_objects; }
@@ -112,6 +120,7 @@ namespace St
         const QSet<quint16>& getMetaClasses() const {return d_metaClasses; }
         typedef QHash<quint16, QList<quint16> > Xref;
         const Xref& getXref() const { return d_xref; }
+        QByteArray prettyValue( quint16 oop ) const;
 
         // oop 0 is reserved as an invalid object pointer!
 
@@ -126,6 +135,7 @@ namespace St
         quint16 fetchByteLenghtOf( quint16 objectPointer ) const;
         quint16 fetchWordLenghtOf( quint16 objectPointer ) const;
         ByteString fetchByteString( quint16 objectPointer ) const;
+        QByteArray fetchByteArray(OOP objectPointer , bool rawData = false) const;
         float fetchFloat( quint16 objectPointer ) const;
 
         quint16 instantiateClassWithPointers( quint16 classPointer, quint16 instanceSize );
@@ -137,14 +147,16 @@ namespace St
         CompiledMethodFlags flagValueOf( quint16 methodPointer ) const;
         bool largeContextFlagOf( quint16 methodPointer ) const;
         quint8 literalCountOf( quint16 methodPointer ) const;
-        ByteString methodBytecodes( quint16 methodPointer ) const;
+        ByteString methodBytecodes( quint16 methodPointer, int* startPc = 0 ) const;
         quint8 argumentCountOf(quint16 methodPointer ) const;
         quint8 primitiveIndexOf(quint16 methodPointer ) const;
         quint16 literalOfMethod(quint8 index, quint16 methodPointer ) const;
         // last literal contains Association to superclass in case of super call
 
         static bool isPointer(quint16);
+        static bool isIntegerObject(quint16 objectPointer);
         static qint16 integerValueOf(quint16 objectPointer );
+        int largeIntegerValueOf(quint16 integerPointer) const;
 
     protected:
         void printObjectTable();
@@ -171,6 +183,7 @@ namespace St
         // all objectTable entries are the same size
         QSet<quint16> d_objects, d_classes, d_metaClasses;
         Xref d_xref;
+        bool d_bigEndian;
     };
 }
 

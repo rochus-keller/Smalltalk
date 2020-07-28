@@ -18,7 +18,7 @@ I needed a good tool, so here we are.
 
 AND NOT TO FORGET: Smalltalk-80 turns 40 this year (2020), and Alan Kay turns 80 (on May 17), and Xerox PARC turns 50 (on July 1)!
 
-Interim conclusion July 2020: I have implemented and optimized a few tools and two Bluebook bytecode interpreters - one in C++ and the other in Lua running on LuaJIT. The Lua version of the interpreter is very fast (i.e. almost as fast as the C++ version) and once again demonstrates the incredible performance of LuaJIT, but not faster than one would expect from an interpreter. I have looked at several ways to get rid of the interpreter and translate the Bluebook bytecode directly to Lua; but none seems feasible without changing the Smalltalk virtual image (which I don't want). The main problem is that a significant part of the VM (e.g. the scheduler, execution contexts and stacks) is implemented directly in Smalltalk and part of the virtual image, and that the virtual image makes many concrete assumptions about the interpreter and the memory model, so these cannot be replaced easily. At the moment, I'm still looking into the possibility of compiling the source code directly (instead of the Bluebook bytecode).
+Interim conclusion July 2020: I have implemented and optimized a few tools and two Bluebook bytecode interpreters - one in C++ and the other in Lua running on LuaJIT. The Lua version of the interpreter is very fast (i.e. almost as fast as the C++ version) and once again demonstrates the incredible performance of LuaJIT, but not faster than one would expect from an interpreter. I have looked at several ways to get rid of the interpreter and translate the Bluebook bytecode directly to Lua; but none so far seems feasible without changing the Smalltalk virtual image (which I don't want). The main problem is that a significant part of the VM (e.g. the scheduler, execution contexts and stacks) is implemented directly in Smalltalk and part of the virtual image, and that the virtual image makes many concrete assumptions about the interpreter and the memory model, so these cannot be replaced easily. At the moment I'm following two approaches and also want to extend the Lua version so that you can load benchmarks that also run on current Smalltalk VMs.
 
 
 ### A Smalltalk-80 parser and code model written in C++
@@ -121,6 +121,8 @@ I was able to achieve yet another significant performance gain. As it turned out
 
 
 The VM supports the ALT+V, ALT+SHIFT+V, ALT+C shortcuts (but not the other shortcuts supported by the C++ version). 
+
+Starting from version 0.6.2 the VM can also directly load and run the virtual image format used by [dbanay's implementation](https://github.com/dbanay/Smalltalk/blob/master/files/snapshot.im). File system access is work in progress.
 
 The VM integrates a Lua IDE with source-level debugger (see https://github.com/rochus-keller/LjTools#lua-parser-and-ide-features); the IDE can be enabled by the -ide or -pro command line option.
 

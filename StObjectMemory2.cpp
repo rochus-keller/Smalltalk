@@ -137,9 +137,9 @@ bool ObjectMemory2::readFrom(QIODevice* in)
 
         const quint16 cls = readU16(objectSpace, addr + 2 );
 
-        const OOP oop = i >> 2;
+        const quint16 slotNr = i >> 2; // OOP are only even number, slotNr are also odd number, so OOP/2, i.e. i/4
 
-        OtSlot* slot = d_ot.allocate( oop, byteLen, cls, isPtr(flags) );
+        OtSlot* slot = d_ot.allocate( slotNr, byteLen, cls, isPtr(flags) );
         Q_ASSERT( slot != 0 );
         slot->d_isOdd = isOdd(flags);
         ::memcpy( slot->d_obj->d_data, objectSpace.constData() + addr + 4, byteLen ); // without header
@@ -460,6 +460,28 @@ bool ObjectMemory2::hasObject(OOP ptr) const
         return !d_ot.d_slots[i].isFree();
     else
         return false;
+}
+
+QByteArrayList ObjectMemory2::allInstVarNames(ObjectMemory2::OOP cls, bool recursive)
+{
+    QByteArrayList res;
+    if( recursive )
+    {
+        OOP super = fetchPointerOfObject(0,cls);
+        if( super && super != objectNil )
+            res += allInstVarNames(super,recursive);
+    }
+    const quint16 vars = fetchPointerOfObject(4,cls);
+    if( vars != objectNil )
+    {
+        const quint16 len = fetchWordLenghtOf(vars);
+        for( int i = 0; i < len; i++ )
+        {
+            const quint16 str = fetchPointerOfObject(i,vars);
+            res << (const char*) fetchByteString(str).d_bytes;
+        }
+    }
+    return res;
 }
 
 QByteArray ObjectMemory2::fetchClassName(OOP classPointer) const

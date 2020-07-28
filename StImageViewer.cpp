@@ -342,7 +342,7 @@ public:
         switch( s->d_kind )
         {
         case Slot::String:
-            return "\"" + QByteArray((const char*)d_om->fetchByteString(s->d_oop).d_bytes) + "\"";
+            return "\"" + d_om->fetchByteArray(s->d_oop) + "\"";
         case Slot::Character:
             {
                 quint16 ch = d_om->fetchWordOfObject(0,s->d_oop);
@@ -887,6 +887,7 @@ QString ImageViewer::classDetailText(quint16 cls)
     out << ( ( spec >> 1 ) & 0x7ff ) << " fixed fields";
     out << "<br>";
 
+#if 1
     const quint16 vars = d_om->fetchPointerOfObject(4,cls);
     if( vars != ST_OBJECT_MEMORY::objectNil )
     {
@@ -895,9 +896,18 @@ QString ImageViewer::classDetailText(quint16 cls)
         for( int i = 0; i < len; i++ )
         {
             const quint16 str = d_om->fetchPointerOfObject(i,vars);
-            out << (const char*) d_om->fetchByteString(str).d_bytes << "<br>";
+            out << d_om->fetchByteArray(str) << "<br>";
         }
     }
+#else
+    const QByteArrayList vars = d_om->allInstVarNames(cls,false);
+    if( !vars.isEmpty() )
+    {
+        out << "<h3>Fields</h3>";
+        for( int i = 0; i < vars.size(); i++ )
+            out << vars[i] << "<br>";
+    }
+#endif
 
     const quint16 md = d_om->fetchPointerOfObject(1,cls);
     const quint16 arr = d_om->fetchPointerOfObject(1,md);
@@ -911,7 +921,7 @@ QString ImageViewer::classDetailText(quint16 cls)
         if( meth == ST_OBJECT_MEMORY::objectNil )
             continue;
         const quint16 sym = d_om->fetchPointerOfObject(i+2,md);
-        list << qMakePair( QString( (const char*)d_om->fetchByteString(sym).d_bytes ), meth );
+        list << qMakePair( QString( d_om->fetchByteArray(sym) ), meth );
     }
     if( !list.isEmpty() )
     {
@@ -941,7 +951,7 @@ QString ImageViewer::methodDetailText(quint16 oop)
         out << "<b>defined in:</b> " << "<a href=\"oop:" + QByteArray::number(selCls.second,16) + "\">" +
                d_om->fetchClassName(selCls.second) + "</a><br>";
     if( selCls.first != 0 )
-        out << "<b>selector:</b> " << (const char*)d_om->fetchByteString(selCls.first).d_bytes << "<br>";
+        out << "<b>selector:</b> " << d_om->fetchByteArray(selCls.first) << "<br>";
     const quint16 args = d_om->argumentCountOf(oop);
     out << "<b>arguments:</b> " << args << "<br>";
     out << "<b>temporaries:</b> " << ( d_om->temporaryCountOf(oop) - args ) << "<br>";
@@ -1013,7 +1023,7 @@ QByteArrayList ImageViewer::fieldList(quint16 cls, bool recursive)
         for( int i = 0; i < len; i++ )
         {
             const quint16 str = d_om->fetchPointerOfObject(i,vars);
-            res << (const char*) d_om->fetchByteString(str).d_bytes;
+            res << d_om->fetchByteArray(str);
         }
     }
     return res;
@@ -1279,7 +1289,7 @@ void ImageViewer::fillStack(quint16 activeContext)
         QPair<quint16,quint16> selCls = findSelectorAndClass(method);
         QString methodName;
         if( selCls.first != 0 )
-            methodName = (const char*)d_om->fetchByteString(selCls.first).d_bytes;
+            methodName = d_om->fetchByteArray(selCls.first);
         else
             methodName = d_om->prettyValue(method);
         if( selCls.second != 0 )
@@ -1600,7 +1610,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk 80 Image Viewer");
-    a.setApplicationVersion("0.8.2");
+    a.setApplicationVersion("0.8.3");
     a.setStyle("Fusion");
 
     ImageViewer w;

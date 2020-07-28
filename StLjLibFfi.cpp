@@ -77,7 +77,7 @@ DllExport void St_initByteArray( ByteArray* ba, int byteLen, void* data )
         memcpy( ba->data, data, byteLen );
 }
 
-DllExport void St_initWordArray( WordArray* wa, int byteLen, void* data )
+DllExport void St_initWordArray( WordArray* wa, int byteLen, void* data, int isBigEndian )
 {
     assert( wa != 0 );
     wa->count = byteLen >> 1;
@@ -85,9 +85,11 @@ DllExport void St_initWordArray( WordArray* wa, int byteLen, void* data )
     {
         uint8_t* bytes = (uint8_t*)data;
         int i = 0;
+        const int off1 = isBigEndian ? 0 : 1;
+        const int off2 = isBigEndian ? 1 : 0;
         while( i < byteLen )
         {
-            wa->data[i>>1] = (bytes[i] << 8) + bytes[i+1];
+            wa->data[i>>1] = (bytes[i+off1] << 8) + bytes[i+off2];
             i += 2;
         }
     }

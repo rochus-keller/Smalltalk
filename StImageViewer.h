@@ -29,7 +29,7 @@ class QLabel;
 class QTreeWidgetItem;
 class QComboBox;
 
-#define ST_OBJECT_MEMORY ObjectMemory2
+#define ST_OBJECT_MEMORY ObjectMemory
 
 namespace St
 {

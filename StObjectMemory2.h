@@ -144,6 +144,7 @@ namespace St
         void storeFloat( OOP objectPointer, float v );
         void swapPointersOf( OOP firstPointer, OOP secondPointer );
         bool hasObject(OOP) const;
+        QByteArrayList allInstVarNames(OOP cls, bool recursive = true );
 
         OOP instantiateClassWithPointers( OOP classPointer, quint16 instanceSize );
         OOP instantiateClassWithWords( OOP classPointer, quint16 instanceSize );

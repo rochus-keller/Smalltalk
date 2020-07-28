@@ -35,7 +35,7 @@ ffi.cdef [[
 	} WordArray;
 	
 	void St_initByteArray( ByteArray* ba, int byteLen, void* data );
-	void St_initWordArray( WordArray* wa, int byteLen, void* data );
+        void St_initWordArray( WordArray* wa, int byteLen, void* data, int isBigEndian );
 	int St_loadImage(const char* path );
 ]]
 
@@ -47,7 +47,7 @@ module.WordArray = WordArray
 local arrayClasses = {} -- weak table to reference all existing ST objects
 arrayClasses.__mode = "kv" 
 
-function module.createArray( rawData, byteLen, isWord )
+function module.createArray( rawData, byteLen, isWord, isLittleEndian )
 	local ctype
 	local size
 	if isWord then
@@ -61,7 +61,7 @@ function module.createArray( rawData, byteLen, isWord )
 	local arr
 	if isWord then
 		arr = ffi.new( ctype, size ) 
-		ffi.C.St_initWordArray( arr, byteLen, rawData )
+                ffi.C.St_initWordArray( arr, byteLen, rawData, isLittleEndian==true )
 	else
 		arr = ffi.new( ctype, size + 1 ) -- add one byte for the zero
 		ffi.C.St_initByteArray( arr, byteLen, rawData ) 
