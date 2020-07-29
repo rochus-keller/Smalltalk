@@ -82,6 +82,16 @@ ffi.cdef[[
                           int destX, int destY, int width, int height,
                           int clipX, int clipY, int clipWidth, int clipHeight );
     void St_copyToClipboard( ByteArray* );
+    int St_openFile( ByteArray* ba );
+    int St_closeFile( int fd );
+    int St_fileSize( int fd );
+    int St_seekFile( int fd, int pos );
+    int St_readFile( int fd, ByteArray* ba );
+    int St_writeFile( int fd, ByteArray* ba, int toWrite );
+    int St_truncateFile( int fd, int size );
+    int St_createFile( ByteArray* ba );
+    int St_deleteFile( ByteArray* ba );
+    int St_renameFile( ByteArray* from, ByteArray* to );
 ]]
 
 ------------------ Module Data ------------------------------------------
@@ -2544,6 +2554,145 @@ end
 primitive[116] = primitive.SignalAtOopsLeftWordsLeft
 
 -- 129 to 255 dispatchPrivatePrimitives
+
+function primitive.PosixFileOperation()
+	-- this is the Lua version of dbanay's void Interpreter::primitivePosixFileOperation() with modifications
+    local page = popStack()
+    local name = popStack()
+    local code = popStack()
+    local file = popStack()
+
+    local DescriptorIndex  = 8 -- fd field of PosixFile
+    local PageNumberIndex  = 3 -- pageNumber  field in PosixFilePage
+    local PageInPageIndex  = 1 -- ByteArray contents in PosixFilePage
+    local BytesInPageIndex = 4 -- bytesInPage field in PosixFilePage
+    local PageSize = 512 -- MUST match page size of PosixFilePage
+    
+    success = success and code >= 0 and code <= 6 and file
+    if success then
+	    if code == 4 then -- open
+		    local fd = C.St_openFile(name.data)
+		    if fd >= 0 then
+			    file[DescriptorIndex] = fd
+			    push(true)
+			else
+				push(false)
+			end
+		elseif code == 5 then -- close
+			local fd = file[DescriptorIndex]
+			file[DescriptorIndex] = nil
+			fd = C.St_closeFile(fd)
+			push( fd >= 0 )
+		elseif code == 3 then -- size
+			local fd = file[DescriptorIndex]
+			local size
+			if fd then
+				size = C.St_fileSize(fd)
+			end
+			if size >= 0 then
+				push(size)
+			else
+				push(nil)
+			end
+		elseif code == 0 then -- read page
+			local fd = file[DescriptorIndex]
+			local pageNumber = page[PageNumberIndex]	
+			success = success and pageNumber >= 1 and fd
+			if success then
+				local byteArray = page[PageInPageIndex]
+				local position = (pageNumber - 1)*PageSize
+				if C.St_seekFile(fd,position) == position then
+					local read = C.St_readFile(fd,byteArray.data)
+					page[BytesInPageIndex] = read
+					push(true)
+				else
+					push(false)
+				end
+			end		
+		elseif code == 1 then -- write page
+			local fd = file[DescriptorIndex]
+			local pageNumber = page[PageNumberIndex]	
+			success = success and pageNumber >= 1 and fd
+			if success then
+				local byteArray = page[PageInPageIndex]
+				local position = (pageNumber - 1)*PageSize
+				if C.St_seekFile(fd,position) == position then
+					local toWrite = page[BytesInPageIndex]
+					local written = C.St_writeFile(fd,byteArray.data,toWrite)
+					push(written==toWrite)
+				else
+					push(false)
+				end
+			end	
+		elseif code == 2 then -- truncate at page
+			local fd = file[DescriptorIndex]
+			success = success and fd
+			if success then
+				if page then
+					local pageNumber = page[PageNumberIndex]	
+					local bytesInPage = page[BytesInPageIndex];
+					local newSize = (pageNumber-1)*PageSize + bytesInPage;
+					push( C.St_truncateFile(fd,newSize) >= 0 )
+				else
+					push( C.St_truncateFile(fd,0) >= 0 )
+				end
+			end							
+		end
+    end
+    if not success then
+	    unPop(4)
+	end
+end
+primitive[130] = primitive.PosixFileOperation
+
+function primitive.PosixDirectoryOperation()
+	-- this is the Lua version of dbanay's void Interpreter::primitivePosixDirectoryOperation() with modifications
+    local DescriptorIndex  = 8 -- fd field of PosixFile
+	local FileNameIndex = 1
+ 
+    local arg2 = popStack()
+    local arg1 = popStack()
+    local code = popInteger()
+    pop(1) -- remove receiver
+    
+    success = success and code >= 0 and code <= 3 and ( arg1 == nil or arg1.data )
+    
+    if success then
+	    if code == 0 then -- create file
+		    local fd = C.St_createFile(arg1.data)
+		    if fd >= 0 then
+			    push(fd)
+			else
+				push(nil)
+			end
+		elseif code == 1 then -- delete file
+			push( C.St_deleteFile(arg1.data) >= 0 )
+		elseif code == 2 then -- rename file
+			local file = arg2
+			local newName = arg1
+			local oldName = file[FileNameIndex]
+			push( C.St_renameFile(oldName.data,newName.data) >= 0 )			
+		elseif code == 3 then -- list files
+			local files = { getfilesofdir() }
+			local strCls = memory.knownObjects[0x0e] -- String
+			local array = { count = #files }
+			setmetatable( array, memory.knownObjects[0x10] ) -- classArray
+			for i=1,#files do
+				local str = files[i]
+				local obj = { data = memory.createArray(nil,#str,false) }
+				ffi.copy(obj.data.data, str)
+				print( ffi.string(obj.data.data) )
+	         	setmetatable(obj, strCls )
+	         	array[i-1] = obj
+			end	
+			push( array )
+	    end
+    else
+	    unPop(4)
+    end
+end
+primitive[131] = primitive.PosixDirectoryOperation
+
 
 function runInterpreter()
 	local interpreter = require "Interpreter"

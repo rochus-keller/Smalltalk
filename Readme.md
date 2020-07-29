@@ -122,7 +122,7 @@ I was able to achieve yet another significant performance gain. As it turned out
 
 The VM supports the ALT+V, ALT+SHIFT+V, ALT+C shortcuts (but not the other shortcuts supported by the C++ version). 
 
-Starting from version 0.6.2 the VM can also directly load and run the virtual image format used by [dbanay's implementation](https://github.com/dbanay/Smalltalk/blob/master/files/snapshot.im). File system access is work in progress.
+Starting from version 0.6.2 the VM can also directly load and run the virtual image format used by [dbanay's implementation](https://github.com/dbanay/Smalltalk/blob/master/files/snapshot.im). Also the file and directory primitives are implemented and tested so that snapshot.im can access the sources and changes file. My intention is to load benchmarks which run on Smalltalk-80 as well as current Squeak and Pharo versions.
 
 The VM integrates a Lua IDE with source-level debugger (see https://github.com/rochus-keller/LjTools#lua-parser-and-ide-features); the IDE can be enabled by the -ide or -pro command line option.
 

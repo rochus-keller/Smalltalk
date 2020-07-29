@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <QFile>
+#include <QDir>
 #include <QDateTime>
 #include "StDisplay.h"
 #include "StLjObjectMemory.h"
@@ -36,6 +37,8 @@
 #else
 #define DllExport
 #endif
+
+static QDir s_imagePath;
 
 extern "C"
 {
@@ -189,6 +192,7 @@ DllExport int St_nextEvent()
 DllExport int St_loadImage(const char* path )
 {
     St::LjObjectMemory om( Lua::Engine2::getInst() );
+    s_imagePath = QFileInfo(path).absoluteDir();
     QFile in(path);
     if( !in.open(QIODevice::ReadOnly) )
     {
@@ -384,5 +388,145 @@ DllExport void St_copyToClipboard( ByteArray* ba )
     if( ba )
         St::Display::copyToClipboard( QByteArray::fromRawData( (char*)ba->data, ba->count ) );
 }
+
+DllExport int St_openFile( ByteArray* ba )
+{
+    QFile* f = new QFile();
+    QString name = QString::fromUtf8((const char*)ba->data);
+    if( QFileInfo(name).isRelative() )
+        name = s_imagePath.absoluteFilePath(name);
+    f->setFileName(name);
+    if( !f->open(QIODevice::ReadWrite) )
+    {
+        delete f;
+        return -1;
+    }
+    St::Display::s_files.append( f );
+    return St::Display::s_files.size() - 1;
+}
+
+DllExport int St_closeFile( int fd )
+{
+    if( fd < St::Display::s_files.size() && St::Display::s_files[fd] )
+    {
+        delete St::Display::s_files[fd];
+        St::Display::s_files[fd] = 0;
+        return 0;
+    }
+    return -1;
+}
+
+DllExport int St_fileSize( int fd )
+{
+    if( fd < St::Display::s_files.size() && St::Display::s_files[fd] )
+        return St::Display::s_files[fd]->size();
+    return -1;
+}
+
+DllExport int St_seekFile( int fd, int pos )
+{
+    if( fd < St::Display::s_files.size() && St::Display::s_files[fd] )
+        return St::Display::s_files[fd]->seek(pos) ? pos : -1;
+    return -1;
+}
+
+DllExport int St_readFile( int fd, ByteArray* ba )
+{
+    if( fd < St::Display::s_files.size() && St::Display::s_files[fd] )
+        return St::Display::s_files[fd]->read((char*)ba->data,ba->count);
+    return -1;
+}
+
+DllExport int St_writeFile( int fd, ByteArray* ba, int toWrite )
+{
+    if( ba->count < toWrite )
+        return -1;
+    if( fd < St::Display::s_files.size() && St::Display::s_files[fd] )
+        return St::Display::s_files[fd]->write((char*)ba->data,toWrite);
+    return -1;
+}
+
+DllExport int St_truncateFile( int fd, int size )
+{
+    if( fd < St::Display::s_files.size() && St::Display::s_files[fd] )
+        return St::Display::s_files[fd]->resize(size) ? 0 : -1;
+    return -1;
+}
+
+DllExport int St_createFile( ByteArray* ba )
+{
+    QString name = QString::fromUtf8((const char*)ba->data);
+    if( QFileInfo(name).isRelative() )
+        name = s_imagePath.absoluteFilePath(name);
+    if( QFileInfo(name).exists() )
+    {
+        if( !QFile::remove(name) )
+            return -1;
+    }
+    QFile* f = new QFile();
+    f->setFileName(name);
+    if( !f->open(QIODevice::ReadWrite) )
+    {
+        delete f;
+        return -1;
+    }
+    St::Display::s_files.append( f );
+    return St::Display::s_files.size() - 1;
+}
+
+DllExport int St_deleteFile( ByteArray* ba )
+{
+    QString name = QString::fromUtf8((const char*)ba->data);
+    if( QFileInfo(name).isRelative() )
+        name = s_imagePath.absoluteFilePath(name);
+    if( !QFile::remove(name) )
+        return -1;
+    for( int i = 0; i < St::Display::s_files.size(); i++ )
+    {
+        if( St::Display::s_files[i] && St::Display::s_files[i]->fileName() == name )
+        {
+            delete St::Display::s_files[i];
+            St::Display::s_files[i] = 0;
+        }
+    }
+    return 0;
+}
+
+DllExport int St_renameFile( ByteArray* from, ByteArray* to )
+{
+    QString fromName = QString::fromUtf8((const char*)from->data);
+    if( QFileInfo(fromName).isRelative() )
+        fromName = s_imagePath.absoluteFilePath(fromName);
+    QString toName = QString::fromUtf8((const char*)to->data);
+    if( QFileInfo(toName).isRelative() )
+        toName = s_imagePath.absoluteFilePath(toName);
+
+    QMap<int,quint32> fdOff;
+    for( int i = 0; i < St::Display::s_files.size(); i++ )
+    {
+        if( St::Display::s_files[i] && St::Display::s_files[i]->fileName() == fromName )
+        {
+            fdOff[i] = St::Display::s_files[i]->pos();
+            St::Display::s_files[i]->close();
+        }
+    }
+
+    const bool res = QFile::rename(fromName,toName);
+    if( !res )
+        toName = fromName;
+
+    QMap<int,quint32>::const_iterator j;
+    for( j = fdOff.begin(); j != fdOff.end(); ++j )
+    {
+        QFile* f = St::Display::s_files[j.key()];
+        f->setFileName(toName);
+        if( !f->open(QIODevice::ReadWrite) )
+            qCritical() << "cannot reopen file" << toName;
+        else
+            f->seek(j.value());
+    }
+    return res ? 0 : -1;
+}
+
 
 }

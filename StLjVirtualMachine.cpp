@@ -48,6 +48,36 @@ static int toaddress(lua_State * L)
     return 1;
 }
 
+static int getfilesofdir(lua_State * L)
+{
+    QString indir;
+    if( lua_gettop(L) > 0 )
+        indir = luaL_checkstring(L,1);
+    QDir dir;
+    if( !indir.isEmpty() )
+    {
+        QFileInfo info(indir);
+        if( info.isRelative() )
+        {
+            lua_getglobal( L,"VirtualImage" );
+            QDir root = QFileInfo( luaL_checkstring(L,-1) ).absoluteDir();
+            lua_pop(L,1);
+            dir = root.absoluteFilePath(indir);
+        }else
+            dir = indir;
+    }else
+    {
+        lua_getglobal( L,"VirtualImage" );
+        dir = QFileInfo( luaL_checkstring(L,-1) ).absoluteDir();
+        lua_pop(L,1);
+    }
+    QStringList files = dir.entryList(QDir::Files);
+    foreach( const QString& f, files )
+        lua_pushstring(L, f.toUtf8().constData() );
+    return files.size();
+}
+
+
 #if LUAJIT_VERSION_NUM >= 20100
 #define ST_USE_MONITOR
 #endif
@@ -195,12 +225,16 @@ LjVirtualMachine::LjVirtualMachine(QObject* parent) : QObject(parent)
 
     lua_pushcfunction( d_lua->getCtx(), toaddress );
     lua_setglobal( d_lua->getCtx(), "toaddress" );
+
+    lua_pushcfunction( d_lua->getCtx(), getfilesofdir );
+    lua_setglobal( d_lua->getCtx(), "getfilesofdir" );
 }
 
 bool LjVirtualMachine::load(const QString& path)
 {    
     lua_pushstring( d_lua->getCtx(), path.toUtf8().constData() );
     lua_setglobal( d_lua->getCtx(),"VirtualImage" );
+    QDir::setCurrent("");
     return true;
 }
 
@@ -245,7 +279,7 @@ int main(int argc, char *argv[])
     a.setOrganizationName("me@rochus-keller.ch");
     a.setOrganizationDomain("github.com/rochus-keller/Smalltalk");
     a.setApplicationName("Smalltalk-80 on LuaJIT");
-    a.setApplicationVersion("0.6.2");
+    a.setApplicationVersion("0.6.3");
     a.setStyle("Fusion");
 
     QString imagePath;
@@ -318,6 +352,7 @@ int main(int argc, char *argv[])
     {
         LuaIde win( vm.getLua() );
         win.getProject()->addBuiltIn("toaddress");
+        win.getProject()->addBuiltIn("getfilesofdir");
         win.getProject()->addBuiltIn("VirtualImage");
         if( !proFile.isEmpty() )
             win.loadFile(proFile);

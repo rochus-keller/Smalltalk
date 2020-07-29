@@ -21,6 +21,7 @@
 */
 
 #include <QElapsedTimer>
+#include <QFile>
 #include <QQueue>
 #include <QWidget>
 
@@ -115,6 +116,7 @@ private:
         static bool s_run;
         static bool s_break;
         static bool s_copy;
+        static QList<QFile*> s_files;
 
         void setBitmap( const Bitmap& );
         const Bitmap& getBitmap() const { return d_bitmap; }

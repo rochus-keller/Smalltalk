@@ -36,6 +36,8 @@ static Display* s_inst = 0;
 bool Display::s_run = true;
 bool Display::s_break = false;
 bool Display::s_copy = false;
+QList<QFile*> Display::s_files;
+
 static const int s_msPerFrame = 30; // 20ms according to BB
 enum { whitePixel = 1, blackPixel = 0 };
 static QFile s_out("st.log");
@@ -81,6 +83,9 @@ Display::Display(QWidget *parent) : QWidget(parent),d_curX(-1),d_curY(-1),d_caps
 Display::~Display()
 {
     s_inst = 0;
+    foreach( QFile* f, s_files )
+        delete f;
+    s_files.clear();
 }
 
 Display*Display::inst()
