@@ -22,6 +22,10 @@ Interim conclusion July 2020: I have implemented and optimized a few tools and t
 
 Update September 2020: Meanwhile I implemented a Smalltalk to Lua and LuaJIT bytecode translator for the SOM dialect and was able to do comparative measurements based on the https://github.com/smarr/are-we-fast-yet benchmark suite; from these experiments I could draw the conclusion that a LuaJIT-based speed-up is currently not possible, because Smalltalk blocks have to be implemented as closures, but the tracing JIT compiler does currently not support their instantiation; the code therefore runs mostly in the interpreter; see https://github.com/rochus-keller/Som for the details. 
 
+Final conclusion December 2020: With the https://github.com/rochus-keller/Som project I was able to demonstrate that even if the tracing JIT compiler of LuaJIT would support closures, a Smalltalk/SOM implementation based on LuaJIT would still be at least factor 7 slower than a plain Lua on LuaJIT implementation or a Smalltalk implementation based on Cog/Spur (such as e.g. Pharo 7). To achieve the performance of Pharo 7 therefore aggressive optimizations on bytecode and VM level would be required, as it was done in https://github.com/OpenSmalltalk/opensmalltalk-vm over a period of 20 years. 
+
+With this project I could show that a Smalltalk-80 implementation on LuaJIT is feasible and achieves a respectable performance with reasonable effort, but by no means the performance of an implementation like Cog/Spur, which has been optimized over decades. 
+
 
 ### A Smalltalk-80 parser and code model written in C++
 
