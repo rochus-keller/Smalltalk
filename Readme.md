@@ -57,13 +57,13 @@ There is also a browsing history; you can go back or forward using the ALT+Left 
 
 Here are some screenshots:
 
-![Overview](http://software.rochus-keller.info/smalltalk80_class_browser.png)
+![Overview](http://software.rochus-keller.ch/smalltalk80_class_browser.png)
 
-![Mark Variables](http://software.rochus-keller.info/st80_browser_mark_variable_show_origin.png)
+![Mark Variables](http://software.rochus-keller.ch/st80_browser_mark_variable_show_origin.png)
 
-![Mark Message Selector](http://software.rochus-keller.info/st80_browser_mark_all_keywords_of_message.png)
+![Mark Message Selector](http://software.rochus-keller.ch/st80_browser_mark_all_keywords_of_message.png)
 
-![Xref](http://software.rochus-keller.info/st80_browser_where_used_or_assigned.png)
+![Xref](http://software.rochus-keller.ch/st80_browser_where_used_or_assigned.png)
 
 
 ### A Smalltalk-80 Image Viewer
@@ -82,7 +82,7 @@ Use CTRL+G to navigate to a given OOP, and CTRL+F to find text in the detail vie
 
 Here is a screenshot:
 
-![Overview](http://software.rochus-keller.info/smalltalk80_image_viewer_0.5.png)
+![Overview](http://software.rochus-keller.ch/smalltalk80_image_viewer_0.5.png)
 
 
 ### A Smalltalk-80 Interpreted Virtual Machine in C++
@@ -99,7 +99,7 @@ If you press ALT+V, the text on the clipboard is sent to the VM as keystrokes; o
 
 Here is a screenshot of the running VM after some interactions:
 
-![Screenshot](http://software.rochus-keller.info/smalltalk80_vm_0.3.3.png)
+![Screenshot](http://software.rochus-keller.ch/smalltalk80_vm_0.3.3.png)
 
 I don't seem to be the only one interested in an original Bluebook Smalltalk-80 VM. Today (May 18 2020) I found this very interesting post on Reddit: https://www.reddit.com/r/smalltalk/comments/glqbrh/in_honor_of_alans_birthday_by_the_bluebook_c/ which refers to https://github.com/dbanay/Smalltalk. The initial commit was apparently on May 12, but most files have a creation date of February or March, one even of December; so obviously it was quite some work; the implementation is based on C++11 and SDL and seems to work very well; I also found Bluebook fixes in Dan's code which I didn't see anywhere else (thanks, Dan!). He implemented a bunch of convenience features like copy paste with the host, and file system access/persistent snapshots, with a customized image. So if you're up to using it for productive work and don't care that you can't directly load the original Xerox virtual image, then better take a look at his implementation.
 
@@ -121,9 +121,9 @@ An analysis with Valgrind revealed that the most expensive functions are mutex l
 
 After further analysis and tests I was able to achieve a considerable performance increase by giving computing time to Qt only each 30ms; this causes several drawing operations to be combined before the Qt drawing engine can update the display; 30ms is short enough that the interaction still appears smooth. In consequence the execution time of testStandardTests is reduced to 36 seconds for the C++ version and 50 seconds for the Lua version (geometric mean of five runs each). Interestingly the first run with the Lua version is the fastest; all other runs are about 10ms slower than the first one; this requires further investigation. The speed-down factor of the first run is 1.14, whereas the speed-down factor based on the geometric mean of all runs increases to 1.35. 
 
-I was able to achieve yet another significant performance gain. As it turned out, a call of QElapsedTimer::elapsed() is surprisingly expensive. Therefore I added another counter, so that elapsed() is called only every few thousand cycles of the interpreter. The C++ version now only needs 5.1 seconds for one benchmark run, which is incredible 28 times less than the measurement before the optimizations. The results of the Lua version vary considerably; the fastest measured time is 9.6 seconds, and the slowest 24.2 seconds; the resulting speed-down factor for the best case is 1.87, which is worse than 1.1, but about as fast as Julia or DotNet Core (and faster than e.g. Java, GoLang and V8) on the current CLBG charts (see [chart1](http://software.rochus-keller.info/St80LjVirtualMachine_0.6.1_clbg_comparison_compiled_languages.png) and [chart2](http://software.rochus-keller.info/St80LjVirtualMachine_0.6.1_clbg_comparison_scripting_languages.png)). Unfortunately there seems to be an issue in LuaJIT, because of which after some time the fast traces are abandoned for no good reason; as a consequence it can happen that the first runs of testStandardTests take 10 seconds each and the following ones suddently 20 seconds, even though it's still the same LuaJIT session and code; here are some results which demonstrate the issue: [perormance report PDF](http://software.rochus-keller.info/St80LjVirtualMachine_0.6_Performance_Report_2020-07-14.pdf). I've learned from [this post](https://www.freelists.org/post/luajit/Inexplicable-behaviour-of-JIT-sudden-speeddown-ofthe-samecode-that-was-running-fast-at-first-in-a-longrunning-Lua-programupdate) that this is a known issue but the only work-around currently available is to switch off Address Space Layout Randomisation (ASLR). I can confirm that this reduces the probability of the issue, at least on my test machine (see [here](https://www.freelists.org/post/luajit/Inexplicable-behaviour-of-JIT-sudden-speeddown-ofthe-samecode-that-was-running-fast-at-first-in-a-longrunning-Lua-program-partial-success) for results); but of course this is not the definitive solution.
+I was able to achieve yet another significant performance gain. As it turned out, a call of QElapsedTimer::elapsed() is surprisingly expensive. Therefore I added another counter, so that elapsed() is called only every few thousand cycles of the interpreter. The C++ version now only needs 5.1 seconds for one benchmark run, which is incredible 28 times less than the measurement before the optimizations. The results of the Lua version vary considerably; the fastest measured time is 9.6 seconds, and the slowest 24.2 seconds; the resulting speed-down factor for the best case is 1.87, which is worse than 1.1, but about as fast as Julia or DotNet Core (and faster than e.g. Java, GoLang and V8) on the current CLBG charts (see [chart1](http://software.rochus-keller.ch/St80LjVirtualMachine_0.6.1_clbg_comparison_compiled_languages.png) and [chart2](http://software.rochus-keller.ch/St80LjVirtualMachine_0.6.1_clbg_comparison_scripting_languages.png)). Unfortunately there seems to be an issue in LuaJIT, because of which after some time the fast traces are abandoned for no good reason; as a consequence it can happen that the first runs of testStandardTests take 10 seconds each and the following ones suddently 20 seconds, even though it's still the same LuaJIT session and code; here are some results which demonstrate the issue: [perormance report PDF](http://software.rochus-keller.ch/St80LjVirtualMachine_0.6_Performance_Report_2020-07-14.pdf). I've learned from [this post](https://www.freelists.org/post/luajit/Inexplicable-behaviour-of-JIT-sudden-speeddown-ofthe-samecode-that-was-running-fast-at-first-in-a-longrunning-Lua-programupdate) that this is a known issue but the only work-around currently available is to switch off Address Space Layout Randomisation (ASLR). I can confirm that this reduces the probability of the issue, at least on my test machine (see [here](https://www.freelists.org/post/luajit/Inexplicable-behaviour-of-JIT-sudden-speeddown-ofthe-samecode-that-was-running-fast-at-first-in-a-longrunning-Lua-program-partial-success) for results); but of course this is not the definitive solution.
 
-**Finally I found the reason for the performance issue**. As it turns out, it was not actually a problem of LuaJIT, but it was the default parameters of LuaJIT that did not fit the present application and caused the observed problems. See [this post](https://www.freelists.org/post/luajit/Inexplicable-behaviour-of-JIT-sudden-speeddown-of-the-same-code-that-was-running-fast-at-first-in-a-longrunning-Lua-program,2) for more information. With optimized parameters the Lua version of the Smalltalk VM only needs **5.8 seconds** (with ASLR switched on) or 5.6 seconds (with ASLR switched off) per run, which is incredible 26 times less than the measurement before the optimizations. The corresponding speed-down factor compared to the C++ version is again **1.1** (i.e. **the LuaJIT version of the Smalltalk-80 VM only needs 5.8 seconds for the same task the C++ version needs 5.1 seconds**), as already found with the Oberon compiler. This is as fast as C or Rust on the current CLBG charts (see [chart1](http://software.rochus-keller.info/St80LjVirtualMachine_0.6.1_clbg_comparison_compiled_languages.png) and [chart2](http://software.rochus-keller.info/St80LjVirtualMachine_0.6.1_clbg_comparison_scripting_languages.png)). The lesson: LuaJIT is extremely fast, but it is necessary to optimize the JIT parameters appropriately for the given application; but even with non-optimal parameters we are at least as fast as Node.js, just amazing. 
+**Finally I found the reason for the performance issue**. As it turns out, it was not actually a problem of LuaJIT, but it was the default parameters of LuaJIT that did not fit the present application and caused the observed problems. See [this post](https://www.freelists.org/post/luajit/Inexplicable-behaviour-of-JIT-sudden-speeddown-of-the-same-code-that-was-running-fast-at-first-in-a-longrunning-Lua-program,2) for more information. With optimized parameters the Lua version of the Smalltalk VM only needs **5.8 seconds** (with ASLR switched on) or 5.6 seconds (with ASLR switched off) per run, which is incredible 26 times less than the measurement before the optimizations. The corresponding speed-down factor compared to the C++ version is again **1.1** (i.e. **the LuaJIT version of the Smalltalk-80 VM only needs 5.8 seconds for the same task the C++ version needs 5.1 seconds**), as already found with the Oberon compiler. This is as fast as C or Rust on the current CLBG charts (see [chart1](http://software.rochus-keller.ch/St80LjVirtualMachine_0.6.1_clbg_comparison_compiled_languages.png) and [chart2](http://software.rochus-keller.ch/St80LjVirtualMachine_0.6.1_clbg_comparison_scripting_languages.png)). The lesson: LuaJIT is extremely fast, but it is necessary to optimize the JIT parameters appropriately for the given application; but even with non-optimal parameters we are at least as fast as Node.js, just amazing. 
 
 Starting from version 0.6.2 the VM can also directly load and run the virtual image format used by [dbanay's implementation](https://github.com/dbanay/Smalltalk/blob/master/files/snapshot.im). Also the file and directory primitives are implemented and tested so that snapshot.im can access the sources and changes file. My intention is to load benchmarks which run on Smalltalk-80 as well as current Squeak and Pharo versions.
 
@@ -136,12 +136,12 @@ The VM integrates a Lua IDE with source-level debugger (see https://github.com/r
 
 Here is a screenshot of the running VM with the Lua IDE/debugger with stack trace and local variables stepping at cycle 121000:
 
-![Screenshot](http://software.rochus-keller.info/smalltalk80_lj_vm_0.5.png)
+![Screenshot](http://software.rochus-keller.ch/smalltalk80_lj_vm_0.5.png)
 
 
 ### Binary versions
 
-Here is a binary version of the class browser, the image viewer and the virtual machines for Windows: http://software.rochus-keller.info/St80Tools_win32.zip.
+Here is a binary version of the class browser, the image viewer and the virtual machines for Windows: http://software.rochus-keller.ch/St80Tools_win32.zip.
 Just unpack the ZIP somewhere on your drive and double-click St80ClassBrowser.exe, St80ImageViewer.exe, St80VirtualMachine.exe or St80LjVirtualMachine.exe; Qt libraries are included as well as the original Smalltalk-80.sources and VirtualImage file.
 
 ### Build Steps
