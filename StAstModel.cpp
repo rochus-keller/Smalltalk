@@ -305,6 +305,7 @@ bool Model::parse(QIODevice* in)
             d_errs += Error( e.d_msg, e.d_pos );
         return false;
     }
+    qDebug() << "Numer of lines with non-comment tokens:" << lex.getTotal();
 
     d_classes2 = p.getClasses();
     // check super classes

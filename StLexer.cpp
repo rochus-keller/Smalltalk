@@ -45,6 +45,8 @@ void Lexer::setDevice(QIODevice* in)
 {
     d_in = in;
     d_line = 0;
+    d_last = 0;
+    d_total = 0;
 }
 
 Lexer::Token Lexer::next()
@@ -55,7 +57,17 @@ Lexer::Token Lexer::next()
         t = d_buffer.first();
         d_buffer.pop_front();
     }else
+    {
         t = nextImp();
+        if( t.d_type != Lexer::Comment && t.d_type > Lexer::EoC )
+        {
+            if( t.d_line != d_last )
+            {
+                d_total++;
+                d_last = t.d_line;
+            }
+        }
+    }
 
     if( t.d_type == Lexer::Comment && d_eatComments )
         t = next();

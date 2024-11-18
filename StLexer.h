@@ -65,6 +65,7 @@ public:
     Token next();
     Token peek(quint8 lookAhead = 1);
     QList<Token> tokens( const QByteArray& code );
+    quint32 getTotal() const { return d_total; }
     static QByteArray getSymbol(const QByteArray& str);
     static bool isBinaryTokType( quint8 );
     static bool isBinaryChar( char );
@@ -91,6 +92,7 @@ private:
     QList<Token> d_buffer;
     bool d_fragMode;
     bool d_eatComments;
+    quint32 d_last, d_total;
     static QHash<QByteArray,QByteArray> d_symbols;
 };
 }
