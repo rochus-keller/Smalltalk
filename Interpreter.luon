@@ -1,0 +1,2742 @@
+(*
+* Copyright 2024 Rochus Keller <mailto:me@rochus-keller.ch>
+*
+* This file is part of the Luon Smalltalk-80 VM.
+*
+* The following is the license that applies to this copy of the
+* application. For a license to use the application under conditions
+* other than those described here, please email to me@rochus-keller.ch.
+*
+* GNU General Public License Usage
+* This file may be used under the terms of the GNU General Public
+* License (GPL) versions 2.0 or 3.0 as published by the Free Software
+* Foundation and appearing in the file LICENSE.GPL included in
+* the packaging of this file. Please review the following information
+* to ensure GNU General Public Licensing requirements will be met:
+* http://www.fsf.org/licensing/licenses/info/GPLv2.html and
+* http://www.gnu.org/copyleft/gpl.html.
+*)
+
+// migrated from the C++ version
+
+module Interpreter
+
+import OM := ObjectMemory, D := Display, DT := DateTime, I := Input, B := BitBlt
+
+type    OOP = OM.OOP
+
+const   // MethodContext:
+        SenderIndex = 0 // BB: The suspended context is called the new context's sender
+        InstructionPointerIndex = 1; StackPointerIndex = 2; MethodIndex = 3
+        ReceiverIndex = 5; TempFrameStart = 6 
+        // BlockContext:
+        CallerIndex = 0; BlockArgumentCountIndex = 3
+        InitialIPIndex = 4; HomeIndex = 5
+        // Registers:
+        ActiveContext = 0; HomeContext = 1; Method = 2; Receiver = 3 
+        MessageSelector = 4; NewMethod = 5; NewProcess = 6; InputSemaphore = 7
+        // MessageIndices:
+        MessageSelectorIndex = 0; MessageArgumentsIndex = 1; MessageSize = 2
+        // ClassIndizes:
+        SuperClassIndex = 0; MessageDictionaryIndex = 1; InstanceSpecIndex = 2
+        // ProcessScheduler:
+        ProcessListIndex = 0; ActiveProcessIndex = 1
+        // StreamIndices:
+        StreamArrayIndex = 0; StreamIndexIndex = 1
+        StreamReadLimitIndex = 2; StreamWriteLimitIndex = 3
+        // LinkedList:
+        FirstLinkIndex = 0; LastLinkIndex = 1
+        // Semaphore:
+        ExcessSignalIndex = 2
+        // Link:
+        NextLinkIndex = 0
+        // Process:
+        SuspendedContextIndex = 1; PriorityIndex = 2; MyListIndex = 3
+        // Point:
+        XIndex = 0; YIndex = 1; ClassPointSize = 2
+        
+        ValueIndex = 1
+        
+var    newProcessWaiting : boolean
+       stackPointer, instructionPointer, argumentCount, primitiveIndex: integer
+       success: boolean
+       cycleNr, level : integer
+       currentBytecode: byte
+       semaphoreList: array 50 of OOP
+       semaphoreIndex: integer
+       toSignal: OOP
+       waitUntil : integer
+
+  procedure interpret*()
+  var ticks: integer
+  begin
+    println("Started Smalltalk interpreter")
+    trap
+    D.run := true
+    cycleNr := 0
+    level := 0
+    newActiveContext( firstContext() )
+    while D.run do
+      cycle()
+      D.processEvents()
+      if waitUntil # 0 then
+        ticks := D.getTicks()
+        if waitUntil - ticks <= 0 then 
+          onTimeout() 
+        end
+      end
+    end
+    println("Finished Smalltalk interpreter")
+  end interpret
+
+  procedure schedulerPointer(): OOP
+  begin
+    return OM.fetchPointerOfObject(ValueIndex, OM.processor )
+  end schedulerPointer
+  
+  procedure activeProcess(): OOP
+  begin
+    if newProcessWaiting then
+      return OM.getRegister(NewProcess)
+    else
+      return OM.fetchPointerOfObject( ActiveProcessIndex, schedulerPointer() )
+    end
+  end activeProcess
+  
+  procedure firstContext(): OOP
+  begin
+    newProcessWaiting := false;
+    return OM.fetchPointerOfObject( SuspendedContextIndex, activeProcess() )
+  end firstContext
+  
+  procedure newActiveContext(aContext: OOP)
+  begin
+    storeContextRegisters()
+    OM.setRegister(ActiveContext, aContext)
+    fetchContextRegisters()
+  end newActiveContext
+  
+  procedure storeContextRegisters()
+  var activeContext: OOP
+  begin 
+    activeContext := OM.getRegister(ActiveContext)
+    if activeContext # 0 then
+      storeInstructionPointerValueInContext( instructionPointer + 1, activeContext )
+      storeStackPointerValueInContext( stackPointer - TempFrameStart + 1, activeContext )
+    end
+  end storeContextRegisters
+  
+  procedure storeInstructionPointerValueInContext(value: integer; contextPointer: OOP)
+  begin 
+    storeIntegerOfObjectWithValue(InstructionPointerIndex, contextPointer, value)
+  end storeInstructionPointerValueInContext
+  
+  procedure storeStackPointerValueInContext(value: integer; contextPointer: OOP )
+  begin 
+    storeIntegerOfObjectWithValue( StackPointerIndex, contextPointer, value )
+  end storeStackPointerValueInContext
+  
+  procedure storeIntegerOfObjectWithValue(fieldIndex: integer; objectPointer: OOP; 
+                                            integerValue: integer)
+  var integerPointer: OOP
+  begin 
+    if OM.isIntegerValue(integerValue) then
+      integerPointer := OM.integerObjectOf(integerValue)
+      OM.storePointerOfObject(fieldIndex, objectPointer, integerPointer)
+    else
+      primitiveFail()
+    end
+  end storeIntegerOfObjectWithValue
+  
+  procedure primitiveFail(): integer
+  begin
+    success := false
+    return 0
+  end primitiveFail
+  
+  procedure fetchContextRegisters()
+  var activeContext, homeContext: OOP
+  begin
+    activeContext := OM.getRegister(ActiveContext)
+    homeContext := 0
+    if isBlockContext(activeContext) then
+        homeContext := OM.fetchPointerOfObject(HomeIndex,activeContext)
+    else
+        homeContext := activeContext
+    end
+    OM.setRegister(HomeContext,homeContext)
+    OM.setRegister(Receiver, OM.fetchPointerOfObject(ReceiverIndex,homeContext))
+    OM.setRegister(Method, OM.fetchPointerOfObject(MethodIndex,homeContext))
+    instructionPointer := instructionPointerOfContext(activeContext) - 1
+    stackPointer := stackPointerOfContext(activeContext) + TempFrameStart - 1
+  end fetchContextRegisters
+  
+  procedure instructionPointerOfContext(contextPointer: OOP): integer
+  begin
+    return fetchIntegerOfObject(InstructionPointerIndex, contextPointer )
+  end instructionPointerOfContext
+  
+  procedure stackPointerOfContext(contextPointer: OOP): integer
+  begin
+    return fetchIntegerOfObject( StackPointerIndex, contextPointer )
+  end stackPointerOfContext
+  
+  procedure fetchIntegerOfObject(fieldIndex: integer; objectPointer: OOP): integer
+  var integerPointer: OOP
+  begin
+    integerPointer := OM.fetchPointerOfObject(fieldIndex,objectPointer)
+    if OM.isIntegerObject(integerPointer) then
+      return OM.integerValueOf(integerPointer)
+    else
+      return primitiveFail()
+    end
+  end fetchIntegerOfObject
+  
+  procedure isBlockContext(contextPointer: OOP): boolean
+  var methodOrArguments: OOP
+  begin
+    methodOrArguments := OM.fetchPointerOfObject(MethodIndex, contextPointer)
+    return OM.isIntegerObject(methodOrArguments)
+  end isBlockContext
+  
+  procedure cycle()
+  begin
+    checkProcessSwitch()
+    currentBytecode := fetchByte()
+    inc(cycleNr)
+    dispatchOnThisBytecode()
+  end cycle
+  
+  procedure checkProcessSwitch()
+  var activeProcess_, scheduler, newProcess: OOP
+  begin
+    while semaphoreIndex >= 0 do
+      synchronousSignal(semaphoreList[semaphoreIndex])
+      dec(semaphoreIndex)
+    end
+    if newProcessWaiting then
+        newProcessWaiting := false
+        activeProcess_ := activeProcess()
+        if activeProcess_ # 0 then
+            OM.storePointerOfObject(SuspendedContextIndex, activeProcess_, 
+              OM.getRegister(ActiveContext))
+        end
+        scheduler := schedulerPointer()
+        newProcess := OM.getRegister(NewProcess)
+        OM.storePointerOfObject(ActiveProcessIndex, scheduler, newProcess )
+        newActiveContext(OM.fetchPointerOfObject( SuspendedContextIndex, newProcess ))
+        OM.setRegister(NewProcess, 0)
+    end
+  end checkProcessSwitch
+  
+  procedure synchronousSignal(aSemaphore: OOP)
+  var excessSignals: integer
+  begin
+    if isEmptyList(aSemaphore) then
+      excessSignals := fetchIntegerOfObject(ExcessSignalIndex,aSemaphore)
+      storeIntegerOfObjectWithValue(ExcessSignalIndex, aSemaphore, excessSignals + 1 )
+    else
+      resume( removeFirstLinkOfList(aSemaphore) )
+    end
+  end synchronousSignal
+  
+  procedure isEmptyList(aLinkedList: OOP): boolean
+  begin
+    if aLinkedList = OM.objectNil then
+      return true
+    else
+      return OM.fetchPointerOfObject(FirstLinkIndex,aLinkedList) = OM.objectNil
+    end
+  end isEmptyList
+  
+  procedure resume(aProcess: OOP)
+  var activeProcess_: OOP; activePriority, newPriority: integer
+  begin
+    activeProcess_ := activeProcess()
+    activePriority := fetchIntegerOfObject( PriorityIndex, activeProcess_ )
+    newPriority := fetchIntegerOfObject( PriorityIndex, aProcess )
+    if newPriority > activePriority then
+      sleep( activeProcess_ )
+      transferTo( aProcess )
+    else
+      sleep( aProcess )
+    end
+  end resume
+  
+  procedure transferTo(aProcess: OOP)
+  begin
+    newProcessWaiting := true
+    OM.setRegister(NewProcess,aProcess)
+  end transferTo
+  
+  procedure removeFirstLinkOfList(aLinkedList: OOP): OOP
+  var firstLink, lastLink, nextLink: OOP
+  begin
+    firstLink := OM.fetchPointerOfObject(FirstLinkIndex,aLinkedList)
+    lastLink := OM.fetchPointerOfObject(LastLinkIndex,aLinkedList)
+    if firstLink = lastLink then
+        OM.storePointerOfObject(FirstLinkIndex, aLinkedList, OM.objectNil )
+        OM.storePointerOfObject(LastLinkIndex, aLinkedList, OM.objectNil )
+    else
+        nextLink := OM.fetchPointerOfObject(NextLinkIndex, firstLink )
+        OM.storePointerOfObject(FirstLinkIndex, aLinkedList, nextLink)
+    end
+    OM.storePointerOfObject(NextLinkIndex, firstLink, OM.objectNil )
+    return firstLink
+  end removeFirstLinkOfList
+  
+  procedure sleep(aProcess: OOP)
+  var priority: integer; processLists, processList: OOP
+  begin
+    priority := fetchIntegerOfObject( PriorityIndex, aProcess )
+    processLists := OM.fetchPointerOfObject( ProcessListIndex, schedulerPointer() )
+    processList := OM.fetchPointerOfObject( priority - 1, processLists )
+    addLastLinkToList( aProcess, processList )
+  end sleep
+  
+  procedure addLastLinkToList(aLink, aLinkedList: OOP)
+  var lastLink: OOP
+  begin
+    if isEmptyList( aLinkedList ) then
+        OM.storePointerOfObject( FirstLinkIndex, aLinkedList, aLink )
+    else
+        lastLink := OM.fetchPointerOfObject( LastLinkIndex, aLinkedList )
+        OM.storePointerOfObject( NextLinkIndex, lastLink, aLink )
+    end
+    OM.storePointerOfObject( LastLinkIndex, aLinkedList, aLink )
+    OM.storePointerOfObject( MyListIndex, aLink, aLinkedList )
+  end addLastLinkToList
+  
+  procedure fetchByte(): byte
+  var res: byte
+  begin
+    assert(instructionPointer >= 0)
+    res := OM.fetchByteOfObject(instructionPointer, OM.getRegister(Method) )
+    inc(instructionPointer)
+    return res
+  end fetchByte
+  
+  procedure dispatchOnThisBytecode() inline
+  var b: byte
+  begin
+    b := currentBytecode
+    if (b >= 0) and (b <= 119) or (b >= 128) and (b <= 130) or (b >= 135) and (b <= 137) then
+        stackBytecode()
+    elsif (b >= 120) and (b <= 127) then
+        returnBytecode()
+    elsif (b >= 131) and (b <= 134) or (b >= 176) and (b <= 255) then
+        sendBytecode()
+    elsif (b >= 144) and (b <= 175) then
+        jumpBytecode()
+    elsif (b >= 138) and (b <= 143) then
+        print("WARNING: running unused bytecode ")println(b)
+    end
+  end dispatchOnThisBytecode
+
+  procedure stackBytecode() inline
+  begin 
+    case currentBytecode of
+    | 0 .. 15 :
+        pushReceiverVariableBytecode()
+    | 16 .. 31 :
+        pushTemporaryVariableBytecode()
+    | 32 .. 63 :
+        pushLiteralConstantBytecode()
+    | 64 .. 95 :
+        pushLiteralVariableBytecode()
+    | 96 .. 103 :
+        storeAndPopReceiverVariableBytecode()
+    | 104 .. 111 :
+        storeAndPopTemporaryVariableBytecode()
+    | 112 :
+        pushReceiverBytecode()
+    | 113 .. 119 :
+        pushConstantBytecode()
+    | 128 :
+        extendedPushBytecode()
+    | 129 :
+        extendedStoreBytecode(false)
+    | 130 :
+        extendedStoreAndPopBytecode()
+    | 135 :
+        popStackBytecode(false)
+    | 136 :
+        duplicateTopBytecode()
+    | 137 :
+        pushActiveContextBytecode()
+    end
+  end stackBytecode
+  
+  procedure pushReceiverVariableBytecode()
+  var receiver: OOP
+  begin 
+    receiver := OM.getRegister(Receiver)
+    TRACE_BYTECODE("receiver: " + OM.prettyValue(receiver))
+    push( OM.fetchPointerOfObject( OM.extractBits( 12, 15, currentBytecode ), receiver ) )
+  end pushReceiverVariableBytecode
+  
+  procedure push(object: OOP)
+  begin
+    if object = 0 then
+      println("WARNING: pushing zero oop to stack, replaced by nil")
+      object := OM.objectNil
+    end
+    inc(stackPointer)
+    OM.storePointerOfObject( stackPointer, OM.getRegister(ActiveContext), object)
+  end push
+  
+  procedure pushTemporaryVariableBytecode()
+  var variable: integer; value: OOP
+  begin 
+    variable := OM.extractBits( 12, 15, currentBytecode )
+    value := temporary( variable )
+    TRACE_BYTECODE("variable: " + tostring(variable) + " value:" + OM.prettyValue(variable))
+    push( value )
+  end pushTemporaryVariableBytecode
+  
+  procedure temporary(offset: integer): OOP
+  begin
+    OM.fetchPointerOfObject( offset + TempFrameStart, OM.getRegister(HomeContext) )
+  end temporary
+  
+  procedure pushLiteralConstantBytecode()
+  var fieldIndex: integer; literalConstant: OOP
+  begin 
+    fieldIndex := OM.extractBits( 11, 15, currentBytecode )
+    literalConstant := literal( fieldIndex )
+    TRACE_BYTECODE("literal: " + tostring(fieldIndex) + " value: " + 
+                      OM.prettyValue(literalConstant) +   
+                       " of method: " + tostring(OM.getRegister(Method) ) )
+    push( literalConstant )
+  end pushLiteralConstantBytecode
+  
+  procedure pushLiteralVariableBytecode()
+  var fieldIndex: integer; association, value: OOP
+  begin 
+    fieldIndex := OM.extractBits( 11, 15, currentBytecode )
+    association := literal( fieldIndex )
+    value := OM.fetchPointerOfObject( ValueIndex, association )
+    TRACE_BYTECODE("literal: " + tostring(fieldIndex) + " value: " + OM.prettyValue(value) +
+                      " of method: " + tostring(OM.getRegister(Method)))
+    push( value )
+  end pushLiteralVariableBytecode
+  
+  procedure storeAndPopReceiverVariableBytecode()
+  var variableIndex: integer; val: OOP
+  begin 
+    variableIndex := OM.extractBits( 13, 15, currentBytecode )
+    val := popStack()
+    TRACE_BYTECODE("var: " + tostring(variableIndex) + " val: " + OM.prettyValue(val) )
+    OM.storePointerOfObject( variableIndex, OM.getRegister(Receiver), val )
+  end storeAndPopReceiverVariableBytecode
+  
+  procedure storeAndPopTemporaryVariableBytecode()
+  var variableIndex: integer; val: OOP
+  begin 
+    variableIndex := OM.extractBits( 13, 15, currentBytecode )
+    val := popStack()
+    TRACE_BYTECODE("var: " + tostring(variableIndex) + " val: " + OM.prettyValue(val))
+    OM.storePointerOfObject( variableIndex + TempFrameStart, OM.getRegister(HomeContext), val )
+  end storeAndPopTemporaryVariableBytecode
+  
+  procedure pushReceiverBytecode()
+  var val: OOP
+  begin 
+    val := OM.getRegister(Receiver)
+    TRACE_BYTECODE("receiver: " + OM.prettyValue(val))
+    push( val )
+  end pushReceiverBytecode
+  
+  procedure pushConstantBytecode()
+  var val: OOP
+  begin 
+    case currentBytecode of
+    | 113:
+        val := OM.objectTrue
+    | 114:
+        val := OM.objectFalse
+    | 115:
+        val := OM.objectNil
+    | 116:
+        val := OM.objectMinusOne
+    | 117:
+        val := OM.objectZero
+    | 118:
+        val := OM.objectOne
+    | 119:
+        val := OM.objectTwo
+    else
+        assert( false )
+    end
+    TRACE_BYTECODE("val: " + OM.prettyValue(val))
+    push( val )
+  end pushConstantBytecode
+  
+  procedure extendedPushBytecode()
+  var descriptor, variableType, variableIndex: integer; val: OOP
+  begin 
+    descriptor := fetchByte()
+    variableType := OM.extractBits( 8, 9, descriptor )
+    variableIndex := OM.extractBits( 10, 15, descriptor )
+    case variableType of
+    | 0:
+        val := OM.fetchPointerOfObject( variableIndex, OM.getRegister(Receiver) )
+    | 1:
+        val := temporary( variableIndex )
+    | 2:
+        val := literal( variableIndex )
+    | 3:
+        val := OM.fetchPointerOfObject( ValueIndex, literal( variableIndex ) )
+    else
+        assert( false )
+    end
+    TRACE_BYTECODE("val: " + OM.prettyValue(val))
+    push(val)
+  end extendedPushBytecode
+  
+  procedure extendedStoreBytecode(subcall: boolean)
+  var descriptor, variableType, variableIndex: integer
+  begin 
+    if not subcall then
+        TRACE_BYTECODE("")
+    end
+    descriptor := fetchByte()
+    variableType := OM.extractBits( 8, 9, descriptor )
+    variableIndex := OM.extractBits( 10, 15, descriptor )
+    case variableType of
+    | 0:
+        OM.storePointerOfObject(variableIndex,OM.getRegister(Receiver),stackTop())
+    | 1:
+        OM.storePointerOfObject(variableIndex+TempFrameStart,OM.getRegister(HomeContext),stackTop())
+    | 2:
+        println("ERROR: illegal store")
+        // BB: self error:
+        assert(false)
+    | 3:
+        OM.storePointerOfObject(ValueIndex, literal(variableIndex), stackTop() )
+    else
+        assert( false )
+    end
+  end extendedStoreBytecode
+  
+  procedure stackTop(): OOP
+  begin
+    return OM.fetchPointerOfObject( stackPointer, OM.getRegister(ActiveContext) )
+  end stackTop
+  
+  procedure extendedStoreAndPopBytecode()
+  begin 
+    TRACE_BYTECODE("")
+    extendedStoreBytecode(true)
+    popStackBytecode(true)
+  end extendedStoreAndPopBytecode
+  
+  procedure popStackBytecode(subcall: boolean)
+  begin 
+    if not subcall then
+      TRACE_BYTECODE("")
+    end
+    popStack()
+  end popStackBytecode
+  
+  procedure duplicateTopBytecode()
+  var val: OOP
+  begin 
+    val := stackTop()
+      TRACE_BYTECODE("val: " + OM.prettyValue(val))
+    push( val )
+  end duplicateTopBytecode
+  
+  procedure pushActiveContextBytecode()
+  begin 
+    TRACE_BYTECODE("")
+    push( OM.getRegister( ActiveContext ) )
+  end pushActiveContextBytecode
+  
+  procedure returnBytecode()
+  begin 
+    case currentBytecode of
+    | 120:
+        returnValue( OM.getRegister(Receiver), sender() )
+    | 121:
+        returnValue( OM.objectTrue, sender() )
+    | 122:
+        returnValue( OM.objectFalse, sender() )
+    | 123:
+        returnValue( OM.objectNil, sender() )
+    | 124:
+        returnValue( popStack(), sender() )
+    | 125:
+        returnValue( popStack(), caller() )
+    else
+        print("WARNING: executing unused bytecode ")println(currentBytecode)
+    end  
+  end returnBytecode
+  
+  procedure popStack(): OOP
+  var stackTop: OOP
+  begin 
+    stackTop := OM.fetchPointerOfObject( stackPointer, OM.getRegister(ActiveContext) )
+    dec(stackPointer)
+    return stackTop
+  end popStack
+  
+  procedure caller(): OOP
+  begin 
+    return OM.fetchPointerOfObject(CallerIndex, OM.getRegister(ActiveContext) ) // BB states SenderIndex instead
+  end caller
+  
+  procedure sender(): OOP
+  begin 
+    return OM.fetchPointerOfObject(SenderIndex, OM.getRegister(HomeContext) )
+  end sender
+  
+  procedure returnValue(resultPointer, contextPointer: OOP)
+  var activeContext, sendersIP: OOP
+  begin 
+    activeContext := OM.getRegister(ActiveContext)
+
+    TRACE_BYTECODE("result: " + OM.prettyValue(resultPointer) +
+                     " context: " + OM.prettyValue(contextPointer) )
+
+    if contextPointer = OM.objectNil then
+        push( activeContext )
+        push( resultPointer )
+        sendSelector(OM.symbolCannotReturn, 1 )
+    end
+    sendersIP := OM.fetchPointerOfObject( InstructionPointerIndex, contextPointer )
+    if sendersIP = OM.objectNil then
+        push( activeContext )
+        push( resultPointer )
+        sendSelector(OM.symbolCannotReturn, 1 )
+    end
+    OM.addTemp(resultPointer) // increaseReferencesTo: resultPointer
+    returnToActiveContext(contextPointer)
+    push( resultPointer )
+    OM.removeTemp(resultPointer) // decreaseReferencesTo: resultPointer
+  end returnValue
+  
+  procedure nilContextFields()
+  begin
+    OM.storePointerOfObject( SenderIndex, OM.getRegister( ActiveContext ), OM.objectNil )
+    OM.storePointerOfObject( InstructionPointerIndex, OM.getRegister( ActiveContext ), OM.objectNil )
+  end nilContextFields
+  
+  procedure returnToActiveContext(aContext: OOP)
+  begin
+    OM.addTemp(aContext) // increaseReferencesTo: aContext
+    nilContextFields()
+    OM.setRegister(ActiveContext,aContext)
+    OM.removeTemp(aContext) // decreaseReferencesTo: activeContext
+    fetchContextRegisters()
+  end returnToActiveContext
+  
+  procedure sendBytecode() inline
+  begin 
+    case currentBytecode of
+    | 131 .. 134 :
+        extendedSendBytecode()
+    | 176 .. 207 :
+        sendSpecialSelectorBytecode()
+    | 208 .. 255 :
+        sendLiteralSelectorBytecode()
+    end
+  end sendBytecode
+  
+  procedure extendedSendBytecode() inline
+  begin 
+    case currentBytecode of
+    | 131:
+      singleExtendedSendBytecode()
+    | 132:
+      doubleExtendedSendBytecode()
+    | 133:
+      singleExtendedSuperBytecode()
+    | 134:
+      doubleExtendedSuperBytecode()
+    else
+        assert(false)
+    end
+  end extendedSendBytecode
+  
+  procedure doubleExtendedSuperBytecode()
+  var selector, methodClass, super: OOP
+  begin 
+    argumentCount := fetchByte()
+    selector := literal( fetchByte() )
+    OM.setRegister( MessageSelector, selector)
+    methodClass := OM.methodClassOf( OM.getRegister(Method) )
+    super := superclassOf(methodClass)
+    TRACE_BYTECODE("selector: " + OM.prettyValue(selector) +
+                    " super: " + OM.prettyValue(super) )
+    sendSelectorToClass( super )
+  end doubleExtendedSuperBytecode
+  
+  procedure sendSelectorToClass(classPointer: OOP)
+  begin
+    lookupMethodInClass(classPointer)
+    executeNewMethod()
+  end sendSelectorToClass
+  
+  procedure lookupMethodInClass(cls: OOP): boolean
+  var currentClass, dictionary, selector: OOP
+  begin 
+    currentClass := cls
+    while currentClass # OM.objectNil do
+        dictionary := OM.fetchPointerOfObject(MessageDictionaryIndex, currentClass)
+        if lookupMethodInDictionary( dictionary ) then
+            return true
+        end
+        currentClass := superclassOf(currentClass)
+    end
+    if OM.getRegister(MessageSelector) = OM.symbolDoesNotUnderstand then
+        println("ERROR: Recursive not understood error encountered")
+        // BB self error:
+        return false
+    end
+    createActualMessage()
+    selector := OM.getRegister(MessageSelector)
+    OM.setRegister(MessageSelector, OM.symbolDoesNotUnderstand )
+    print("ERROR: class ")print(OM.prettyValue(cls))
+    print(" doesNotUnderstand ")println(OM.prettyValue( selector ))
+    assert(false)
+    return false
+  end lookupMethodInClass
+  
+  procedure createActualMessage()
+  var argumentArray, message: OOP
+  begin
+    argumentArray := OM.instantiateClassWithPointers( OM.classArray, argumentCount )
+    message := OM.instantiateClassWithPointers( OM.classMessage, MessageSize )
+    OM.storePointerOfObject( MessageSelectorIndex, message, OM.getRegister(MessageSelector) )
+    OM.storePointerOfObject( MessageArgumentsIndex, message, argumentArray )
+    transfer( argumentCount, stackPointer - (argumentCount - 1 ), 
+      OM.getRegister(ActiveContext), 0, argumentArray )
+    pop( argumentCount )
+    push( message )
+    argumentCount := 1
+  end createActualMessage
+  
+  procedure pop(number: integer)
+  begin
+    stackPointer := stackPointer - number
+  end pop
+  
+  procedure transfer(count, firstFrom: integer; fromOop: OOP; firstTo: integer; toOop: OOP)
+  var fromIndex, lastFrom, toIndex: integer; oop: OOP
+  begin
+    fromIndex := firstFrom
+    lastFrom := firstFrom + count
+    toIndex := firstTo
+    while fromIndex < lastFrom do
+        oop := OM.fetchPointerOfObject(fromIndex, fromOop)
+        OM.storePointerOfObject(toIndex,toOop,oop)
+        OM.storePointerOfObject(fromIndex,fromOop,OM.objectNil )
+        inc(fromIndex)
+        inc(toIndex)
+    end
+  end transfer
+  
+  procedure lookupMethodInDictionary(dictionary: OOP): boolean
+  const SelectorStart = 2; MethodArrayIndex = 1
+  var messageSelector, nextSelector, methodArray, newMethod: OOP
+      length, mask, index: integer; wrapAround: boolean
+  begin
+    messageSelector := OM.getRegister(MessageSelector)
+    length := OM.fetchWordLenghtOf(dictionary)
+    mask := length - SelectorStart - 1
+    index := bitand( mask, bitshr(messageSelector, 1) ) + SelectorStart
+    wrapAround := false
+    loop
+        nextSelector := OM.fetchPointerOfObject(index, dictionary)
+        if nextSelector = OM.objectNil then
+          return false
+        end
+        if nextSelector = messageSelector then
+            methodArray := OM.fetchPointerOfObject(MethodArrayIndex, dictionary)
+            newMethod := OM.fetchPointerOfObject(index - SelectorStart, methodArray)
+            OM.setRegister(NewMethod,newMethod)
+            primitiveIndex := OM.primitiveIndexOf(newMethod)
+            return true
+        end
+        index := index + 1
+        if index = length then
+            if wrapAround then
+              return false
+            end
+            wrapAround := true
+            index := SelectorStart
+        end
+    end
+  end lookupMethodInDictionary
+  
+  procedure executeNewMethod()
+  begin 
+    // ST_TRACE_METHOD_CALL;
+    if not primitiveResponse() then
+      activateNewMethod()
+    end
+  end executeNewMethod
+  
+  procedure primitiveResponse(): boolean
+  var flagValue: integer
+  begin
+    if primitiveIndex = 0 then
+        flagValue := OM.flagValueOf( OM.getRegister(NewMethod) )
+        case flagValue of
+        | 5:
+            // NOP quickReturnSelf()
+            return true
+        | 6:
+            quickInstanceLoad()
+            return true
+        end
+    else
+        initPrimitive()
+        dispatchPrimitives()
+        return success
+    end
+    return false
+  end primitiveResponse
+  
+  procedure activateNewMethod()
+  var contextSize: integer; newMethod, newContext, activeContext: OOP
+  begin 
+    inc(level)
+    <* if ST_TRACE_SYSTEM_ERRORS then *> 
+    if OM.getRegister(MessageSelector ) = 011ah then // error:
+        print("ERROR: ") println(OM.fetchByteArray(stackTop()))
+        assert(false)
+    end
+    <* end *>
+    contextSize := TempFrameStart
+    newMethod := OM.getRegister(NewMethod)
+    if OM.largeContextFlagOf( newMethod ) then
+      contextSize := contextSize + 32
+    else
+      contextSize := contextSize + 12
+    end
+    newContext := OM.instantiateClassWithPointers(OM.classMethodContext,contextSize)
+    activeContext := OM.getRegister(ActiveContext)
+    OM.storePointerOfObject(SenderIndex, newContext, activeContext )
+    storeInstructionPointerValueInContext( OM.initialInstructionPointerOfMethod( newMethod ), newContext )
+    storeStackPointerValueInContext( OM.temporaryCountOf( newMethod ), newContext )
+    OM.storePointerOfObject(MethodIndex,newContext,newMethod)
+    transfer( argumentCount + 1, stackPointer - argumentCount, activeContext, ReceiverIndex, newContext )
+    pop( argumentCount + 1 )
+    newActiveContext(newContext)
+  end activateNewMethod
+  
+  procedure quickInstanceLoad()
+  var thisReceiver, val: OOP; fieldIndex: integer
+  begin 
+    thisReceiver := popStack()
+    fieldIndex := OM.fieldIndexOf( OM.getRegister(NewMethod) )
+    val := OM.fetchPointerOfObject( fieldIndex, thisReceiver )
+    push( val )
+  end quickInstanceLoad
+  
+  procedure dispatchPrimitives() inline
+  begin 
+    case primitiveIndex of
+    | 0 .. 59:
+      dispatchArithmeticPrimitives()
+    | 60 .. 67:
+      dispatchSubscriptAndStreamPrimitives()
+    | 68 .. 79:
+      dispatchStorageManagementPrimitives()
+    | 80 .. 89:
+      dispatchControlPrimitives()
+    | 90 .. 109:
+      dispatchInputOutputPrimitives()
+    | 110 .. 127:
+      dispatchSystemPrimitives()
+    | 128 .. 255:
+      dispatchPrivatePrimitives()
+    else
+      primitiveFail()
+    end
+  end dispatchPrimitives
+  
+  procedure dispatchArithmeticPrimitives() inline
+  begin 
+    case primitiveIndex of
+    | 0 .. 19:
+      dispatchIntegerPrimitives()
+    | 20 .. 39:
+      dispatchLargeIntegerPrimitives()
+    | 40 .. 59:
+      dispatchFloatPrimitives()
+    else
+      primitiveFail()
+    end
+  end dispatchArithmeticPrimitives
+  
+  procedure dispatchIntegerPrimitives() inline
+  begin 
+    case primitiveIndex of
+    | 1:
+        primitiveAdd()
+    | 2:
+        primitiveSubtract()
+    | 3:
+        primitiveLessThan()
+    | 4:
+        primitiveGreaterThan()
+    | 5:
+        primitiveLessOrEqual()
+    | 6:
+        primitiveGreaterOrEqual()
+    | 7:
+        primitiveEqual()
+    | 8:
+        primitiveNotEqual()
+    | 9:
+        primitiveMultiply()
+    | 10:
+        primitiveDivide()
+    | 11:
+        primitiveMod()
+    | 12:
+        primitiveDiv()
+    | 13:
+        primitiveQuo()
+    | 14:
+        primitiveBitAnd()
+    | 15:
+        primitiveBitOr()
+    | 16:
+        primitiveBitXor()
+    | 17:
+        primitiveBitShift()
+    | 18:
+        primitiveMakePoint()
+    else
+        primitiveFail()
+    end
+  end dispatchIntegerPrimitives
+  
+  procedure primitiveQuo()
+  var integerArgument, integerReceiver: real
+      integerResult: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    integerArgument := flt(popInteger())
+    integerReceiver := flt(popInteger())
+    successUpdate( integerArgument # 0.0 )
+    integerResult := 0
+    if success then
+      integerResult := floor( integerReceiver / integerArgument + 0.5 )
+      successUpdate( OM.isIntegerValue(integerResult) )
+    end
+    if success then
+      pushInteger( integerResult )
+    else
+      unPop(2)
+    end
+  end primitiveQuo
+  
+  procedure popInteger(): integer
+  var integerPointer: OOP
+  begin
+    integerPointer := popStack()
+    successUpdate( OM.isIntegerObject(integerPointer) )
+    if success then
+      return OM.integerValueOf(integerPointer)
+    else
+      return 0
+    end
+  end popInteger
+
+  procedure primitiveBitXor()
+  var integerArgument, integerReceiver, integerResult: integer
+  begin 
+    integerArgument := popInteger()
+    if not success then unPop(2) return end
+    integerReceiver := popInteger()
+    if not success then unPop(2) return end
+    integerResult := bitxor(integerReceiver, integerArgument)
+    pushInteger( integerResult )
+    // NOTE: original checks isInteger(result)
+  end primitiveBitXor
+
+  procedure dispatchLargeIntegerPrimitives() inline
+  begin 
+    primitiveFail()
+  end dispatchLargeIntegerPrimitives
+  
+  procedure dispatchFloatPrimitives() inline
+  begin 
+    case primitiveIndex of
+    | 40:
+        primitiveAsFloat()
+    | 41:
+        primitiveFloatAdd()
+    | 42:
+        primitiveFloatSubtract()
+    | 43:
+        primitiveFloatLessThan()
+    | 44:
+        primitiveFloatGreaterThan()
+    | 45:
+        primitiveFloatLessOrEqual()
+    | 46:
+        primitiveFloatGreaterOrEqual()
+    | 47:
+        primitiveFloatEqual()
+    | 48:
+        primitiveFloatNotEqual()
+    | 49:
+        primitiveFloatMultiply()
+    | 50:
+        primitiveFloatDivide()
+    | 51:
+        primitiveTruncated()
+    | 52:
+        primitiveFractionalPart()
+    | 53:
+        primitiveExponent()
+    | 54:
+        primitiveTimesTwoPower()
+    else
+        primitiveFail()
+    end
+  end dispatchFloatPrimitives
+
+  procedure primitiveAsFloat()
+  var integerReceiver: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    integerReceiver := popInteger()
+    if success then
+      pushFloat(flt(integerReceiver))
+    else
+      unPop(1)
+    end
+  end primitiveAsFloat
+  
+  procedure pushFloat(v: real)
+  var f: OOP
+  begin
+    f := OM.instantiateClassWithWords(OM.classFloat, 2)
+    OM.storeFloat(f,v)
+    push(f)
+  end pushFloat
+  
+  procedure primitiveFloatAdd()
+  var floatArgument, floatReceiver: real
+  begin 
+    TRACE_PRIMITIVE("")
+    floatArgument := popFloat()
+    floatReceiver := popFloat()
+    if success then
+      pushFloat(floatReceiver + floatArgument)
+    else unPop(2) end
+  end primitiveFloatAdd
+  
+  procedure popFloat(): real
+  var f: OOP
+  begin
+    f := popStack()
+    successUpdate( OM.fetchClassOf(f) = OM.classFloat )
+    if success then
+        return OM.fetchFloat(f)
+    else
+        return 0.0 // TODO should be NAN
+    end
+  end popFloat
+  
+  procedure primitiveFloatSubtract()
+  var floatArgument, floatReceiver: real
+  begin 
+    TRACE_PRIMITIVE("")
+    floatArgument := popFloat()
+    floatReceiver := popFloat()
+    if success then
+      pushFloat(floatReceiver - floatArgument)
+    else unPop(2) end
+  end primitiveFloatSubtract
+  
+  procedure pushBool(b: boolean) inline
+  begin
+      if b then push(OM.objectTrue) else push(OM.objectFalse) end
+  end pushBool
+  
+  procedure primitiveFloatLessThan()
+  var floatArgument, floatReceiver: real
+  begin 
+    TRACE_PRIMITIVE("")
+    floatArgument := popFloat()
+    floatReceiver := popFloat()
+    if success then
+      pushBool(floatReceiver < floatArgument)
+    else unPop(2) end
+  end primitiveFloatLessThan
+  
+  procedure primitiveFloatGreaterThan()
+  var floatArgument, floatReceiver: real
+  begin 
+    TRACE_PRIMITIVE("")
+    floatArgument := popFloat()
+    floatReceiver := popFloat()
+    if success then
+      pushBool(floatReceiver > floatArgument)
+    else unPop(2) end
+  end primitiveFloatGreaterThan
+  
+  procedure primitiveFloatLessOrEqual()
+  var floatArgument, floatReceiver: real
+  begin 
+    TRACE_PRIMITIVE("")
+    floatArgument := popFloat()
+    floatReceiver := popFloat()
+    if success then
+      pushBool(floatReceiver <= floatArgument)
+    else unPop(2) end
+  end primitiveFloatLessOrEqual
+  
+  procedure primitiveFloatGreaterOrEqual()
+  var floatArgument, floatReceiver: real
+  begin 
+    TRACE_PRIMITIVE("")
+    floatArgument := popFloat()
+    floatReceiver := popFloat()
+    if success then
+      pushBool(floatReceiver >= floatArgument)
+    else unPop(2) end
+  end primitiveFloatGreaterOrEqual
+  
+  procedure primitiveFloatEqual()
+  var floatArgument, floatReceiver: real
+  begin 
+    TRACE_PRIMITIVE("")
+    floatArgument := popFloat()
+    floatReceiver := popFloat()
+    if success then
+      pushBool(floatReceiver = floatArgument)
+    else unPop(2) end
+  end primitiveFloatEqual
+  
+  procedure primitiveFloatNotEqual()
+  var floatArgument, floatReceiver: real
+  begin 
+    TRACE_PRIMITIVE("")
+    floatArgument := popFloat()
+    floatReceiver := popFloat()
+    if success then
+      pushBool(floatReceiver # floatArgument)
+    else unPop(2) end
+  end primitiveFloatNotEqual
+  
+  procedure primitiveFloatMultiply()
+  var floatArgument, floatReceiver: real
+  begin 
+    TRACE_PRIMITIVE("")
+    floatArgument := popFloat()
+    floatReceiver := popFloat()
+    if success then
+      pushFloat(floatReceiver * floatArgument)
+    else unPop(2) end
+  end primitiveFloatMultiply
+  
+  procedure primitiveFloatDivide()
+  var floatArgument, floatReceiver: real
+  begin 
+    TRACE_PRIMITIVE("")
+    floatArgument := popFloat()
+    floatReceiver := popFloat()
+    if success then
+      pushFloat(floatReceiver / floatArgument)
+    else unPop(2) end
+  end primitiveFloatDivide
+  
+  procedure primitiveTruncated()
+  var floatReceiver: real
+  begin 
+    TRACE_PRIMITIVE("")
+    floatReceiver := popFloat()
+    if success then
+        pushInteger(floor(floatReceiver))
+    else unPop(1) end
+  end primitiveTruncated
+  
+  procedure primitiveFractionalPart()
+  var floatReceiver: real
+  begin 
+    TRACE_PRIMITIVE("")
+    floatReceiver := popFloat()
+    if success then
+        pushFloat(floatReceiver - flt(floor(floatReceiver)))
+    else unPop(1) end  
+  end primitiveFractionalPart
+  
+  procedure primitiveExponent()
+  begin 
+    TRACE_PRIMITIVE("")
+    primitiveFail() // optional
+  end primitiveExponent
+  
+  procedure primitiveTimesTwoPower()
+  begin 
+    TRACE_PRIMITIVE("")
+    primitiveFail() // optional
+  end primitiveTimesTwoPower
+  
+  procedure dispatchSubscriptAndStreamPrimitives() inline
+  begin 
+    case primitiveIndex of
+    | 60:
+        primitiveAt()
+    | 61:
+        primitiveAtPut()
+    | 62:
+        primitiveSize()
+    | 63:
+        primitiveStringAt()
+    | 64:
+        primitiveStringAtPut()
+    | 65:
+        primitiveNext()
+    | 66:
+        primitiveNextPut()
+    | 67:
+        primitiveAtEnd()
+    else
+        primitiveFail()
+    end
+  end dispatchSubscriptAndStreamPrimitives
+
+  procedure primitiveAt() 
+  var tmp, arr, arrayClass, result: OOP
+      index: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    tmp := popStack()
+    index := positive16BitValueOf( tmp )
+    arr := popStack()
+    arrayClass := OM.fetchClassOf(arr)
+    checkIndexableBoundsOf(index, arr)
+    result := 0;
+    if success then
+        index  := index + fixedFieldsOf(arrayClass)
+        result := subscriptWith(arr,index)
+    end
+    if success then push(result) else unPop(2) end
+  end primitiveAt
+
+  procedure subscriptWith(arr: OOP; index: integer): OOP
+  var cls: OOP; value: integer
+  begin
+    cls := OM.fetchClassOf(arr)
+    if isWords(cls) then
+        if isPointers(cls) then
+            return OM.fetchPointerOfObject(index-1,arr)
+        else
+            value := OM.fetchWordOfObject(index-1,arr)
+            return positive16BitIntegerFor(value)
+        end
+    else
+        value := OM.fetchByteOfObject(index-1,arr)
+        return OM.integerObjectOf(value)
+    end
+  end subscriptWith
+  
+  procedure positive16BitIntegerFor(integerValue: integer): OOP
+  var newLargeInteger: OOP
+  begin
+    if OM.extractBits( 0, 1, integerValue ) = 0 then // BB error, fixed like VIM
+      return OM.integerObjectOf(integerValue)
+    end
+
+    newLargeInteger := OM.instantiateClassWithBytes(OM.classLargePositiveInteger, 2)
+
+    OM.storeByteOfObject( 0, newLargeInteger, lowByteOf( integerValue ) )
+    OM.storeByteOfObject( 1, newLargeInteger, highByteOf( integerValue ) )
+    return newLargeInteger
+  end positive16BitIntegerFor
+  
+  procedure lowByteOf( anInteger: integer ): byte
+  begin
+    return clip(OM.extractBits( 8, 15, anInteger ))
+  end lowByteOf
+  
+  procedure highByteOf( anInteger: integer ): byte
+  begin
+    return clip(OM.extractBits( 0, 7, anInteger ))
+  end highByteOf
+  
+  procedure isPointers(classPointer: OOP): boolean
+  begin
+    return bitand(instanceSpecificationOf(classPointer), 08000h) # 0
+  end isPointers
+  
+  procedure checkIndexableBoundsOf(index: integer; arr: OOP)
+  var cls: OOP
+  begin
+    cls := OM.fetchClassOf(arr)
+    successUpdate( index >= 1 )
+    successUpdate( index + fixedFieldsOf(cls) <= lengthOf(arr) )
+  end checkIndexableBoundsOf
+  
+  procedure fixedFieldsOf(classPointer: OOP): integer
+  begin
+    return bitand( bitshr( instanceSpecificationOf(classPointer), 1 ), 07ffh )
+  end fixedFieldsOf
+  
+  procedure instanceSpecificationOf(classPointer: OOP): OOP
+  begin
+    return OM.fetchPointerOfObject(InstanceSpecIndex,classPointer)
+  end instanceSpecificationOf
+
+  procedure lengthOf(arr: OOP): integer
+  begin
+    if isWords( OM.fetchClassOf(arr) ) then
+      return OM.fetchWordLenghtOf(arr)
+    else
+      return OM.fetchByteLenghtOf(arr)
+    end
+  end lengthOf
+  
+  procedure isWords(classPointer: OOP): boolean
+  begin
+    return bitand(instanceSpecificationOf(classPointer), 04000h) # 0
+  end isWords
+  
+  procedure positive16BitValueOf(integerPointer: OOP): integer
+  var value: integer
+  begin
+    if OM.isIntegerObject(integerPointer) then
+      return OM.integerValueOf(integerPointer)
+    end
+
+    if OM.fetchClassOf(integerPointer) # OM.classLargePositiveInteger then
+      return primitiveFail()
+    end
+
+    if OM.fetchByteLenghtOf(integerPointer) # 2 then
+      return primitiveFail()
+    end
+
+    value := OM.fetchByteOfObject(1, integerPointer)
+    value := value * 256 + OM.fetchByteOfObject(0, integerPointer)
+    return value
+  end positive16BitValueOf
+  
+  procedure primitiveAtPut() 
+  var value, arr, arrayClass: OOP
+      index: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    value := popStack()
+    index := positive16BitValueOf( popStack() )
+    arr := popStack()
+    arrayClass := OM.fetchClassOf(arr)
+    checkIndexableBoundsOf(index,arr)
+    if success then
+      index := index + fixedFieldsOf(arrayClass)
+      subscriptWithStoring(arr,index,value)
+    end
+    if success then
+      push(value)
+    else unPop(3) end
+  end primitiveAtPut
+
+  procedure subscriptWithStoring(arr: OOP; index: integer; value: OOP)
+  var cls: OOP
+  begin
+    cls := OM.fetchClassOf(arr)
+    if isWords(cls) then
+      if isPointers(cls) then
+        OM.storePointerOfObject(index-1, arr, value )
+      else
+        successUpdate( OM.isIntegerObject(value) )
+        if success then
+            OM.storeWordOfObject(index-1, arr, positive16BitValueOf(value) )
+        // else never observed so far
+        end
+      end
+    else
+      successUpdate( OM.isIntegerObject(value) )
+      if success then
+        OM.storeByteOfObject(index-1, arr, lowByteOf( OM.integerValueOf(value) ) )
+      end
+    end
+  end subscriptWithStoring
+  
+  procedure primitiveSize() 
+  var arr, cls, length: OOP
+  begin 
+    arr := popStack()
+    cls := OM.fetchClassOf(arr)
+    length := positive16BitIntegerFor( lengthOf(arr) - fixedFieldsOf(cls) )
+    TRACE_PRIMITIVE("size " + tostring(OM.integerValueOf(length)))
+    if success then
+      push(length)
+    else unPop(1) end
+  end primitiveSize
+
+  procedure primitiveStringAt() 
+  var index, ascii: integer
+      arr, character: OOP
+  begin 
+    TRACE_PRIMITIVE("")
+    index := positive16BitValueOf( popStack() )
+    arr := popStack()
+    checkIndexableBoundsOf(index,arr)
+    character := 0
+    if success then
+      ascii := OM.integerValueOf( subscriptWith(arr,index) )
+      character := OM.fetchPointerOfObject(ascii, OM.characterTable )
+    end
+    if success then
+      push(character)
+    else unPop(2) end
+  end primitiveStringAt
+
+  procedure primitiveStringAtPut() 
+  var character, arr, ascii: OOP; index: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    character := popStack()
+    index := positive16BitValueOf( popStack() )
+    arr := popStack()
+    checkIndexableBoundsOf(index, arr)
+    successUpdate( OM.fetchClassOf(character) = OM.classCharacter )
+    if success then
+      ascii := OM.fetchPointerOfObject(0,character)
+      subscriptWithStoring(arr,index,ascii)
+    end
+    if success then
+      push(character)
+    else unPop(3) end // BB error, VIM fixed
+  end primitiveStringAtPut
+
+  procedure primitiveNext() 
+  var stream, arr, arrayClass,result: OOP
+      index, limit, ascii: integer
+  begin
+    TRACE_PRIMITIVE("")
+    stream := popStack()
+    arr := OM.fetchPointerOfObject(StreamArrayIndex,stream)
+    arrayClass := OM.fetchClassOf(arr)
+    index := fetchIntegerOfObject(StreamIndexIndex,stream)
+    limit := fetchIntegerOfObject(StreamReadLimitIndex,stream)
+    successUpdate( index < limit )
+    successUpdate( (arrayClass = OM.classArray) or (arrayClass = OM.classString) )
+    checkIndexableBoundsOf( index + 1, arr)
+    result := 0
+    if success then
+      inc(index)
+      result := subscriptWith(arr,index)
+    end
+    if success then
+      storeIntegerOfObjectWithValue(StreamIndexIndex,stream,index)
+    end
+    if success then
+      if arrayClass = OM.classArray then
+        push(result)
+      else
+        ascii := OM.integerValueOf(result)
+        push( OM.fetchPointerOfObject( ascii, OM.characterTable ) )
+      end
+    else unPop(1) end
+  end primitiveNext
+
+  procedure primitiveNextPut() 
+  var value, stream, arr, arrayClass, ascii: OOP
+      index, limit: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    value := popStack()
+    stream := popStack()
+    arr := OM.fetchPointerOfObject(StreamArrayIndex, stream)
+    arrayClass := OM.fetchClassOf(arr)
+    index := fetchIntegerOfObject(StreamIndexIndex,stream)
+    limit := fetchIntegerOfObject(StreamWriteLimitIndex, stream)
+    successUpdate( index < limit )
+    successUpdate( (arrayClass = OM.classArray) or (arrayClass = OM.classString) )
+    checkIndexableBoundsOf( index + 1, arr)
+    if success then
+      inc(index)
+      if arrayClass = OM.classArray then
+        subscriptWithStoring(arr,index,value)
+      else
+        ascii := OM.fetchPointerOfObject(0, value) // character value index 0
+        subscriptWithStoring(arr, index, ascii )
+      end
+    end
+    if success then
+      storeIntegerOfObjectWithValue(StreamIndexIndex, stream, index)
+    end
+    if success then
+      push(value)
+    else unPop(2) end
+  end primitiveNextPut
+
+  procedure primitiveAtEnd() 
+  var stream, arr, arrayClass: OOP
+      lenght, index, limit: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    stream := popStack()
+    arr := OM.fetchPointerOfObject(StreamArrayIndex, stream)
+    arrayClass := OM.fetchClassOf(arr)
+    lenght := lengthOf(arr)
+    index := fetchIntegerOfObject(StreamIndexIndex,stream)
+    limit := fetchIntegerOfObject(StreamReadLimitIndex, stream)
+    successUpdate( index < limit )
+    successUpdate( (arrayClass = OM.classArray) or (arrayClass = OM.classString) )
+    if success then
+      if (index >= limit) or (index >= lenght) then
+        push( OM.objectTrue )
+      else
+        push( OM.objectFalse )
+      end
+    else unPop(1) end
+  end primitiveAtEnd
+
+  procedure dispatchStorageManagementPrimitives() inline
+  begin 
+    case primitiveIndex of
+    | 68:
+        primitiveObjectAt()
+    | 69:
+        primitiveObjectAtPut()
+    | 70:
+        primitiveNew()
+    | 71:
+        primitiveNewWithArg()
+    | 72:
+        primitiveBecome()
+    | 73:
+        primitiveInstVarAt()
+    | 74:
+        primitiveInstVarAtPut()
+    | 75:
+        primitiveAsOop()
+    | 76:
+        primitiveAsObject()
+    | 77:
+        primitiveSomeInstance()
+    | 78:
+        primitiveNextInstance()
+    | 79:
+        primitiveNewMethod()
+    else
+        primitiveFail()
+    end
+  end dispatchStorageManagementPrimitives
+  
+  procedure primitiveObjectAt() 
+  var index: integer; thisReceiver: OOP
+  begin 
+    TRACE_PRIMITIVE("")
+    index := popInteger()
+    thisReceiver := popStack()
+    successUpdate( index > 0)
+    successUpdate( index <= OM.objectPointerCountOf(thisReceiver) )
+    if success then
+      push( OM.fetchPointerOfObject(index-1, thisReceiver) )
+    else unPop(2) end
+  end primitiveObjectAt
+
+  procedure primitiveObjectAtPut() 
+  var newValue, thisReceiver: OOP; index: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    newValue := popStack()
+    index := popInteger()
+    thisReceiver := popStack()
+    successUpdate( index > 0)
+    successUpdate( index <= ( OM.objectPointerCountOf(thisReceiver) ) )
+    if success then
+      OM.storePointerOfObject(index-1, thisReceiver, newValue )
+      push( newValue )
+    else unPop(3) end
+  end primitiveObjectAtPut
+
+  procedure primitiveNew() 
+  var cls: OOP; size: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    cls := popStack()
+    size := fixedFieldsOf(cls)
+    successUpdate( not isIndexable(cls) )
+    if success then
+        if isPointers(cls) then
+          push( OM.instantiateClassWithPointers(cls,size) )
+        else
+          push( OM.instantiateClassWithWords(cls,size) )
+        end
+    else unPop(1) end
+  end primitiveNew
+
+  procedure isIndexable(classPointer: OOP): boolean
+  begin
+    return bitand(instanceSpecificationOf(classPointer), 02000h) # 0
+  end isIndexable
+  
+  procedure primitiveNewWithArg() 
+  var size: integer; cls: OOP
+  begin 
+    TRACE_PRIMITIVE("")
+    size := positive16BitValueOf( popStack() )
+    cls := popStack()
+    successUpdate( isIndexable(cls) )
+    if success then
+      size := size + fixedFieldsOf(cls)
+      if isPointers(cls) then
+        push( OM.instantiateClassWithPointers(cls,size) )
+      elsif isWords(cls) then
+        push( OM.instantiateClassWithWords(cls,size) )
+      else
+        push( OM.instantiateClassWithBytes(cls,size) )
+      end
+    else unPop(2) end
+  end primitiveNewWithArg
+
+  procedure primitiveBecome() 
+  var otherPointer, thisReceiver: OOP
+  begin 
+    TRACE_PRIMITIVE("")
+    otherPointer := popStack()
+    thisReceiver := popStack()
+    successUpdate( not OM.isIntegerObject(otherPointer) )
+    successUpdate( not OM.isIntegerObject(thisReceiver) )
+    if success then
+      OM.swapPointersOf(thisReceiver,otherPointer)
+      push(thisReceiver)
+    else unPop(2) end
+  end primitiveBecome
+
+  procedure primitiveInstVarAt() 
+  var index: integer; thisReceiver, value: OOP
+  begin 
+    TRACE_PRIMITIVE("")
+    index := popInteger()
+    thisReceiver := popStack()
+    checkInstanceVariableBoundsOf(index,thisReceiver)
+    value := 0
+    if success then
+      value := subscriptWith(thisReceiver,index)
+    end
+    if success then
+      push(value)
+    else unPop(2) end
+  end primitiveInstVarAt
+
+  procedure checkInstanceVariableBoundsOf(index: integer; object: OOP)
+  begin
+    // OOP cls = memory->fetchClassOf(object) // BB makes this fetch, but not used
+    successUpdate( index >= 1 )
+    successUpdate( index <= lengthOf(object))
+  end checkInstanceVariableBoundsOf
+  
+  procedure primitiveInstVarAtPut() 
+  var newValue, thisReceiver: OOP; index: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    newValue := popStack()
+    index := popInteger()
+    thisReceiver := popStack()
+    checkInstanceVariableBoundsOf(index,thisReceiver)
+    if success then
+      subscriptWithStoring(thisReceiver,index,newValue)
+    end
+    if success then
+      push(newValue)
+    else unPop(3) end
+  end primitiveInstVarAtPut
+
+  procedure primitiveAsOop() 
+  var thisReceiver: OOP
+  begin
+    TRACE_PRIMITIVE("")
+    thisReceiver := popStack()
+    successUpdate( not OM.isIntegerObject(thisReceiver) )
+    if success then
+      push( bitor(thisReceiver, 01h ))
+    else unPop(1) end
+  end primitiveAsOop
+
+  procedure primitiveAsObject() 
+  var thisReceiver, newOop: OOP
+  begin
+    TRACE_PRIMITIVE("")
+    thisReceiver := popStack()
+    newOop := bitand(thisReceiver, 0fffeh)
+    successUpdate( OM.hasObject( newOop ) ) // hasObject is not documented in BB
+    if success then
+      push( newOop )
+    else unPop(1) end
+  end primitiveAsObject
+
+  procedure primitiveSomeInstance() 
+  var cls, next: OOP
+  begin 
+    TRACE_PRIMITIVE("")
+    cls := popStack()
+    next := OM.getNextInstance(cls, 0)
+    if next # 0 then
+      push(next)
+    else
+      primitiveFail()
+    end
+  end primitiveSomeInstance
+
+  procedure primitiveNextInstance() 
+  var object, cls, next: OOP
+  begin 
+    TRACE_PRIMITIVE("")
+    object := popStack()
+    cls := OM.fetchClassOf(object)
+    next := OM.getNextInstance(cls, object)
+    if next # 0 then
+      push(next)
+    else
+      primitiveFail()
+    end
+  end primitiveNextInstance
+
+  procedure primitiveNewMethod() 
+  var header, cls, newMethod: OOP
+      bytecodeCount, literalCount, size, i: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    header := popStack()
+    bytecodeCount := popInteger()
+    cls := popStack()
+    literalCount := OM.extractBits( 9, 14, header ) // literalCountOfHeader
+    size := ( literalCount + 1 ) * 2 + bytecodeCount
+    newMethod := OM.instantiateClassWithBytes(cls,size)
+    OM.storeWordOfObject(0, newMethod, header) // BB error: this line got obviously lost
+    for i := 0 to literalCount - 1 do
+      OM.storePointerOfObject(1 + i, newMethod, OM.objectNil )  // BB error, VIM fixed
+    end
+    push( newMethod )
+  end primitiveNewMethod
+  
+  procedure dispatchControlPrimitives() inline
+  begin 
+    case primitiveIndex of
+    | 80:
+        primitiveBlockCopy()
+    | 81:
+        primitiveValue()
+    | 82:
+        primitiveValueWithArgs()
+    | 83:
+        primitivePerform()
+    | 84:
+        primitivePerformWithArgs()
+    | 85:
+        primitiveSignal()
+    | 86:
+        primitiveWait()
+    | 87:
+        primitiveResume()
+    | 88:
+        primitiveSuspend()
+    | 89:
+        primitiveFlushCache()
+    else
+        primitiveFail()
+    end
+  end dispatchControlPrimitives
+
+  procedure primitiveBlockCopy() 
+  var blockArgumentCount, context, methodContext, newContext, initialIP: OOP
+      contextSize: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    blockArgumentCount := popStack()
+    context := popStack()
+    methodContext := 0
+    if isBlockContext(context) then
+      methodContext := OM.fetchPointerOfObject(HomeIndex,context)
+    else
+      methodContext := context
+    end
+    contextSize := OM.fetchWordLenghtOf(methodContext)
+    newContext := OM.instantiateClassWithPointers( OM.classBlockContext, contextSize )
+    initialIP := OM.integerObjectOf(instructionPointer+3)
+    OM.storePointerOfObject(InitialIPIndex, newContext, initialIP)
+    OM.storePointerOfObject(InstructionPointerIndex, newContext, initialIP)
+    storeStackPointerValueInContext(0,newContext)
+    OM.storePointerOfObject(BlockArgumentCountIndex, newContext, blockArgumentCount )
+    OM.storePointerOfObject(HomeIndex, newContext, methodContext )
+    push(newContext)
+  end primitiveBlockCopy
+  
+  procedure primitiveValue() 
+  var blockContext, blockArgumentCount, initialIP: OOP
+  begin 
+    TRACE_PRIMITIVE("")
+    blockContext := stackValue(argumentCount)
+    blockArgumentCount := argumentCountOfBlock(blockContext)
+    successUpdate( argumentCount = blockArgumentCount )
+    if success then
+      transfer(argumentCount, stackPointer-argumentCount+1,
+              OM.getRegister(ActiveContext), TempFrameStart, blockContext )
+      pop(argumentCount+1)
+      initialIP := OM.fetchPointerOfObject(InitialIPIndex, blockContext)
+      OM.storePointerOfObject(InstructionPointerIndex, blockContext, initialIP)
+      storeStackPointerValueInContext(argumentCount, blockContext)
+      OM.storePointerOfObject(CallerIndex, blockContext, OM.getRegister(ActiveContext) )
+      newActiveContext(blockContext)
+    end
+  end primitiveValue
+  
+  procedure argumentCountOfBlock(blockPointer: OOP): OOP
+  begin
+    return fetchIntegerOfObject( BlockArgumentCountIndex, blockPointer )
+  end argumentCountOfBlock
+  
+  procedure primitiveValueWithArgs() 
+  var argumentArray, blockContext, blockArgumentCount, 
+      arrayClass, arrayArgumentCount, initialIP: OOP
+  begin 
+    TRACE_PRIMITIVE("")
+    argumentArray := popStack()
+    blockContext := popStack()
+    blockArgumentCount := argumentCountOfBlock(blockContext)
+    arrayClass := OM.fetchClassOf(argumentArray)
+    successUpdate( arrayClass = OM.classArray )
+    arrayArgumentCount := 0
+    if success then
+      arrayArgumentCount := OM.fetchWordLenghtOf(argumentArray)
+      successUpdate( arrayArgumentCount = blockArgumentCount )
+    end
+    if success then
+      transfer( arrayArgumentCount, 0, argumentArray, TempFrameStart, blockContext )
+      initialIP := OM.fetchPointerOfObject(InitialIPIndex, blockContext)
+      OM.storePointerOfObject(InstructionPointerIndex, blockContext, initialIP )
+      storeStackPointerValueInContext( arrayArgumentCount, blockContext )
+      OM.storePointerOfObject(CallerIndex, blockContext, OM.getRegister(ActiveContext) )
+      newActiveContext( blockContext )
+    else unPop(2) end
+  end primitiveValueWithArgs
+  
+  procedure primitivePerform() 
+  var performSelector, newSelector, newReceiver: OOP
+      selectorIndex: integer
+  begin 
+    performSelector := OM.getRegister(MessageSelector)
+    newSelector := stackValue(argumentCount-1)
+    OM.setRegister(MessageSelector, newSelector)
+    TRACE_PRIMITIVE("selector " + OM.prettyValue(newSelector))
+    newReceiver := stackValue(argumentCount)
+    lookupMethodInClass( OM.fetchClassOf(newReceiver) )
+    successUpdate( OM.argumentCountOf( OM.getRegister(NewMethod) ) = argumentCount - 1 )
+    if success then
+      selectorIndex := stackPointer - argumentCount + 1
+      transfer( argumentCount -1 , selectorIndex + 1, OM.getRegister(ActiveContext),
+                selectorIndex, OM.getRegister(ActiveContext) )
+      pop(1)
+      dec(argumentCount)
+      executeNewMethod()
+    else
+      OM.setRegister(MessageSelector, performSelector )
+    end
+  end primitivePerform
+  
+  procedure primitivePerformWithArgs() 
+  var argumentArray, arrayClass, performSelector, thisReceiver: OOP
+      arraySize, index: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    argumentArray := popStack()
+    arraySize := OM.fetchWordLenghtOf(argumentArray)
+    arrayClass := OM.fetchClassOf(argumentArray)
+    successUpdate( (stackPointer+arraySize) < OM.fetchWordLenghtOf( OM.getRegister(ActiveContext) ) )
+    successUpdate( arrayClass = OM.classArray )
+    if success then
+      performSelector := OM.getRegister(MessageSelector)
+      OM.setRegister(MessageSelector, popStack())
+      thisReceiver := stackTop()
+      argumentCount := arraySize
+      index := 1
+      while index <= argumentCount do
+        push( OM.fetchPointerOfObject(index-1, argumentArray) )
+        inc(index)
+      end
+      lookupMethodInClass( OM.fetchClassOf(thisReceiver) )
+      successUpdate( OM.argumentCountOf( OM.getRegister(NewMethod) ) = argumentCount )
+      if success then
+        executeNewMethod()
+      else
+        unPop(argumentCount)
+        push( OM.getRegister(MessageSelector))
+        push(argumentArray)
+        argumentCount := 2
+        OM.setRegister(MessageSelector, performSelector )
+      end
+    else unPop(1) end
+  end primitivePerformWithArgs
+  
+  procedure primitiveSignal() 
+  var top: OOP
+  begin 
+    top := stackTop()
+    TRACE_PRIMITIVE("stackTop " + OM.prettyValue(top))
+    synchronousSignal( top )
+  end primitiveSignal
+  
+  procedure primitiveWait() 
+  var thisReceiver: OOP; excessSignals: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    thisReceiver := stackTop()
+    excessSignals := fetchIntegerOfObject( ExcessSignalIndex, thisReceiver )
+    if excessSignals > 0 then
+        storeIntegerOfObjectWithValue( ExcessSignalIndex, thisReceiver, excessSignals - 1 )
+    else
+        addLastLinkToList( activeProcess(), thisReceiver )
+        suspendActive()
+    end
+  end primitiveWait
+  
+  procedure suspendActive()
+  begin
+    transferTo( wakeHighestPriority() )
+  end suspendActive
+  
+  procedure wakeHighestPriority(): OOP inline
+  var processLists, processList: OOP; priority: integer
+  begin
+    processLists := OM.fetchPointerOfObject( ProcessListIndex, schedulerPointer() )
+    priority := OM.fetchWordLenghtOf( processLists )
+    processList := 0
+    loop
+        processList := OM.fetchPointerOfObject( priority - 1, processLists )
+        if isEmptyList( processList ) then
+            dec(priority)
+        else exit end
+    end
+    return removeFirstLinkOfList( processList )
+  end wakeHighestPriority
+  
+  procedure primitiveResume() 
+  begin 
+    TRACE_PRIMITIVE("")
+    resume( stackTop() )
+  end primitiveResume
+  
+  procedure primitiveSuspend() 
+  begin 
+    TRACE_PRIMITIVE("")
+    successUpdate( stackTop() = activeProcess() )
+    if success then
+        popStack()
+        push( OM.objectNil )
+        suspendActive()
+    end
+  end primitiveSuspend
+  
+  procedure primitiveFlushCache() 
+  begin 
+    TRACE_PRIMITIVE("")
+    // initializeMethodCache()
+    // we don't have that
+  end primitiveFlushCache
+  
+  procedure dispatchInputOutputPrimitives() inline
+  begin 
+    case primitiveIndex of
+    | 90:
+        primitiveMousePoint()
+    | 91:
+        primitiveCursorLocPut()
+    | 92:
+        primitiveCursorLink()
+    | 93:
+        primitiveInputSemaphore()
+    | 94:
+        primitiveSamleInterval()
+    | 95:
+        primitiveInputWord()
+    | 96:
+        primitiveCopyBits()
+    | 98:
+        primitiveTimeWordsInto()
+    | 99:
+        primitiveTickWordsInto()
+    | 100:
+        primitiveSignalAtTick()
+    | 101:
+        primitiveBeCursor()
+    | 102:
+        primitiveBeDisplay()
+    | 105:
+        primitiveStringReplace()
+    | 97, 103, 104:
+        primitiveFail() // not implemented
+    else
+        primitiveFail()
+    end
+  end dispatchInputOutputPrimitives
+  
+  procedure primitiveMousePoint() 
+  begin 
+    TRACE_PRIMITIVE("")
+    // Not used
+    primitiveFail()
+  end primitiveMousePoint
+  
+  procedure primitiveCursorLocPut() 
+  var point: OOP; x, y: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    point := popStack()
+    x := OM.integerValueOf( OM.fetchPointerOfObject( XIndex, point ) )
+    y := OM.integerValueOf( OM.fetchPointerOfObject( YIndex, point ) )
+    D.setCursorPos( x, y)
+  end primitiveCursorLocPut
+  
+  procedure primitiveCursorLink() 
+  begin 
+    TRACE_PRIMITIVE("")
+    print("WARNING: primitiveCursorLink not supported ")
+    println( OM.prettyValue(stackTop()))
+    popStack() // bool
+  end primitiveCursorLink
+  
+  procedure primitiveInputSemaphore() 
+  begin 
+    TRACE_PRIMITIVE("")
+    OM.setRegister( InputSemaphore, popStack() )
+  end primitiveInputSemaphore
+  
+  procedure primitiveSamleInterval() 
+  begin 
+    TRACE_PRIMITIVE("")
+    println("WARNING: primitiveSamleInterval not yet implemented")
+    primitiveFail()
+  end primitiveSamleInterval
+  
+  procedure primitiveInputWord() 
+  begin 
+    TRACE_PRIMITIVE("")
+    pop(1)
+    push( positive16BitIntegerFor( D.nextEvent() ) )
+  end primitiveInputWord
+  
+  procedure primitiveCopyBits() 
+  var bitblt: OOP; destBits, sourceBits, halftoneBits: D.Bitmap
+      drawToDisp: boolean
+  begin 
+    (* Stack:
+    9 "<a BitBlt>" // there is always a BitBlt or one of its subclasses top of the stack
+    8 "<a Form>"
+    7 "3"
+    6 "<a Rectangle>"
+    *)
+    bitblt := stackTop()
+
+    destBits := fetchBitmap(OM.fetchPointerOfObject(0,bitblt) )
+    sourceBits := fetchBitmap(OM.fetchPointerOfObject(1,bitblt) )
+    halftoneBits := fetchBitmap(OM.fetchPointerOfObject(2,bitblt) )
+
+    drawToDisp := D.getScreenBitmap().buffer = destBits.buffer
+    TRACE_PRIMITIVE( "to disp: " + tostring(drawToDisp) )
+
+    B.destBits := destBits
+    B.sourceBits := sourceBits
+    B.halftoneBits := halftoneBits
+    B.combinationRule := OM.integerValueOf( OM.fetchPointerOfObject(3,bitblt) )
+    B.destX := OM.integerValueOf( OM.fetchPointerOfObject(4,bitblt) )
+    B.destY := OM.integerValueOf( OM.fetchPointerOfObject(5,bitblt) )
+    B.width := OM.integerValueOf( OM.fetchPointerOfObject(6,bitblt) )
+    B.height := OM.integerValueOf( OM.fetchPointerOfObject(7,bitblt) )
+    B.sourceX := OM.integerValueOf( OM.fetchPointerOfObject(8,bitblt) )
+    B.sourceY := OM.integerValueOf( OM.fetchPointerOfObject(9,bitblt) )
+    B.clipX := OM.integerValueOf( OM.fetchPointerOfObject(10,bitblt) )
+    B.clipY := OM.integerValueOf( OM.fetchPointerOfObject(11,bitblt) )
+    B.clipWidth := OM.integerValueOf( OM.fetchPointerOfObject(12,bitblt) )
+    B.clipHeight := OM.integerValueOf( OM.fetchPointerOfObject(13,bitblt) )
+
+    B.copyBits()
+
+    if drawToDisp then
+      D.updateArea( D.intersect({B.destX, B.destY, B.width, B.height}, 
+                                {B.clipX, B.clipY, B.clipWidth, B.clipHeight}) )
+    end
+  end primitiveCopyBits
+  
+  procedure primitiveTimeWordsInto() 
+  var oop: OOP
+      cur: DT.DateTime
+      diff: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    oop := popStack()
+    cur := DT.current()
+    diff := DT.diff( {1901, 1, 1, 0, 0, 0 }, cur )
+    OM.storeByteOfObject(3,oop, clip(bitand( bitshr( diff, 24 ), 0ffh)) )
+    OM.storeByteOfObject(2,oop, clip(bitand( bitshr( diff, 16 ), 0ffh)) )
+    OM.storeByteOfObject(1,oop, clip(bitand( bitshr( diff, 8 ), 0ffh)) )
+    OM.storeByteOfObject(0,oop, clip(bitand(diff, 0ffh )) )
+  end primitiveTimeWordsInto
+  
+  procedure primitiveTickWordsInto() 
+  var oop: OOP; diff: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    oop := popStack()
+    diff := I.Time() div 1000
+    OM.storeByteOfObject(3,oop, clip(bitand( bitshr( diff, 24 ), 0ffh)) )
+    OM.storeByteOfObject(2,oop, clip(bitand( bitshr( diff, 16 ), 0ffh)) )
+    OM.storeByteOfObject(1,oop, clip(bitand( bitshr( diff, 8 ), 0ffh)) )
+    OM.storeByteOfObject(0,oop, clip(bitand(diff, 0ffh )) )
+  end primitiveTickWordsInto
+  
+  procedure primitiveSignalAtTick() 
+  var oop: OOP; time, ticks: integer
+  begin 
+    TRACE_PRIMITIVE("")
+    oop := popStack()
+    toSignal := popStack()
+    time := bitshl(OM.fetchByteOfObject(3,oop), 24) +
+              bitshl(OM.fetchByteOfObject(2,oop), 16) +
+              bitshl(OM.fetchByteOfObject(1,oop), 8) +
+              OM.fetchByteOfObject(0,oop)
+    ticks := D.getTicks()
+    if time - ticks > 0 then
+      waitUntil := time
+    else
+      asynchronousSignal(toSignal)
+    end
+  end primitiveSignalAtTick
+  
+  procedure asynchronousSignal(aSemaphore: OOP)
+  begin
+    inc(semaphoreIndex)
+    semaphoreList[semaphoreIndex] := aSemaphore
+  end asynchronousSignal
+  
+  procedure onTimeout()
+  begin // run this when waitUntil - ticks <= 0
+    waitUntil := 0
+    if toSignal # 0 then
+      asynchronousSignal(toSignal)
+    end
+  end onTimeout
+  
+  procedure primitiveBeCursor() 
+  var cursor: OOP; bitmap: D.Bitmap
+  begin 
+    TRACE_PRIMITIVE("")
+    cursor := popStack()
+    bitmap := fetchBitmap(cursor)
+    D.setCursorBitmap(bitmap)
+  end primitiveBeCursor
+  
+  procedure fetchBitmap(form: OOP): D.Bitmap
+  var bitmap: OOP; width, height: integer; bs: OM.ByteArray
+  begin
+    if form = OM.objectNil then return nil end
+    bitmap := OM.fetchPointerOfObject(0,form)
+    width := OM.integerValueOf(OM.fetchPointerOfObject(1,form))
+    height := OM.integerValueOf(OM.fetchPointerOfObject(2,form))
+    bs := OM.fetchByteString(bitmap)
+    assert( bs # nil )
+    return D.createBitmap( bs, OM.getWordLen(bs), width, height )
+  end fetchBitmap
+  
+  procedure primitiveBeDisplay() 
+  var displayScreen: OOP
+  begin 
+    TRACE_PRIMITIVE("")
+    displayScreen := popStack()
+    D.setScreenBitmap( fetchBitmap(displayScreen) )
+  end primitiveBeDisplay
+  
+  procedure primitiveStringReplace() 
+  begin 
+    TRACE_PRIMITIVE("")
+    primitiveFail() // optional, apparently has as smalltalk implementation
+  end primitiveStringReplace
+  
+  procedure dispatchSystemPrimitives() inline
+  begin 
+    case primitiveIndex of
+    | 110:
+        primitiveEquivalent()
+    | 111:
+        primitiveClass()
+    | 112, 115:
+        // number of unallocated Words in object space
+        pushInteger(0efffh) // phantasy number
+    | 113:
+        primitiveQuit()
+    | 114:
+        println("WARNING: primitiveExitToDebugger not yet implemnted")
+    | 116:
+        primitiveSignalAtOopsLeftWordsLeft()
+    else
+        primitiveFail()
+    end
+  end dispatchSystemPrimitives
+  
+  procedure pushInteger(integerValue: integer)
+  begin
+    push( OM.integerObjectOf(integerValue))
+  end pushInteger
+  
+  procedure primitiveEquivalent() 
+  var otherObject, thisObject: OOP
+  begin
+    TRACE_PRIMITIVE("")
+    otherObject := popStack()
+    thisObject := popStack()
+    if thisObject = otherObject then
+      push( OM.objectTrue )
+    else
+      push( OM.objectFalse )
+    end
+  end primitiveEquivalent
+  
+  procedure primitiveClass() 
+  var instance: OOP
+  begin 
+    TRACE_PRIMITIVE("")
+    instance := popStack()
+    push( OM.fetchClassOf(instance) )
+  end primitiveClass
+  
+  procedure primitiveQuit() 
+  begin 
+    TRACE_PRIMITIVE("")
+    D.run := false
+  end primitiveQuit
+  
+  procedure primitiveSignalAtOopsLeftWordsLeft() 
+  var number1, number2, semaphore: OOP
+  begin 
+    TRACE_PRIMITIVE("")
+    number1 := popStack()
+    number2 := popStack()
+    semaphore := popStack()
+
+    // BB error: not documented, neither in VIM
+    print("WARNING: primitiveSignalAtOopsLeftWordsLeft not implemented ")
+    print(OM.prettyValue(number1)) print(" ")
+    print(OM.prettyValue(number2)) print(" ")
+    println(OM.prettyValue(semaphore))
+  end primitiveSignalAtOopsLeftWordsLeft
+ 
+  procedure dispatchPrivatePrimitives() inline
+  begin 
+    TRACE_PRIMITIVE("")
+    print("WARNING: private primitive ")
+    print(primitiveIndex)
+    println(" not yet implemented")
+    primitiveFail()
+  end dispatchPrivatePrimitives
+  
+  procedure superclassOf(cls: OOP): OOP
+  begin
+    if cls = OM.objectNil then
+        println("WARNING: asking for superclass of nil")
+        return cls
+    end
+    return OM.fetchPointerOfObject(SuperClassIndex,cls)
+  end superclassOf
+  
+  procedure singleExtendedSuperBytecode()
+  var descriptor, selectorIndex: integer
+      selector, method, methodClass, super: OOP
+  begin 
+    descriptor := fetchByte()
+    argumentCount := OM.extractBits( 8, 10, descriptor )
+    selectorIndex := OM.extractBits( 11, 15, descriptor )
+    selector := literal( selectorIndex )
+    OM.setRegister( MessageSelector, selector)
+    method := OM.getRegister(Method)
+    methodClass := OM.methodClassOf( method )
+    super := superclassOf(methodClass)
+    TRACE_BYTECODE("selector: " + OM.prettyValue(selector) +
+                   " super: " + OM.prettyValue(super) )
+    sendSelectorToClass( super )
+  end singleExtendedSuperBytecode
+  
+  procedure doubleExtendedSendBytecode()
+  var count: integer; selector: OOP
+  begin 
+    count := fetchByte()
+    selector := literal( fetchByte() )
+    TRACE_BYTECODE("selector: " + OM.prettyValue(selector) + " count: " + tostring(count) )
+    sendSelector( selector, count )
+  end doubleExtendedSendBytecode
+  
+  procedure singleExtendedSendBytecode()
+  var descriptor, selectorIndex, _argumentCount: integer; selector: OOP
+  begin 
+    descriptor := fetchByte()
+    selectorIndex := OM.extractBits( 11, 15, descriptor )
+    _argumentCount := OM.extractBits( 8, 10, descriptor )
+    selector := literal(selectorIndex)
+    TRACE_BYTECODE("selector: " + OM.prettyValue(selector) + " count: " + tostring(_argumentCount) )
+    sendSelector( selector, _argumentCount )
+  end singleExtendedSendBytecode
+  
+  procedure sendSpecialSelectorBytecode()
+  var selectorIndex, count: integer; selector: OOP
+  begin 
+    if not specialSelectorPrimitiveResponse() then
+      selectorIndex := ( currentBytecode - 176 ) * 2
+      selector := OM.fetchPointerOfObject(selectorIndex, OM.specialSelectors )
+      count := fetchIntegerOfObject( selectorIndex + 1, OM.specialSelectors )
+      TRACE_BYTECODE("selector: " + OM.prettyValue(selector) + " count: " + tostring(count) )
+      sendSelector( selector, count )
+    else
+      TRACE_BYTECODE("primitive")
+    end
+  end sendSpecialSelectorBytecode
+  
+  procedure specialSelectorPrimitiveResponse(): boolean
+  begin 
+    initPrimitive()
+    if (currentBytecode >= 176) and (currentBytecode <= 191) then
+      arithmeticSelectorPrimitive()
+    elsif (currentBytecode >= 192) and (currentBytecode <= 207) then
+      commonSelectorPrimitive()
+    end
+    return success
+  end specialSelectorPrimitiveResponse
+  
+  procedure initPrimitive() inline
+  begin 
+    success := true
+  end initPrimitive
+  
+  procedure arithmeticSelectorPrimitive() inline
+  begin 
+    successUpdate( OM.isIntegerObject( stackValue(1) ) )
+    if not success then return end
+    case currentBytecode of
+    | 176:
+        primitiveAdd()
+    | 177:
+        primitiveSubtract()
+    | 178:
+        primitiveLessThan()
+    | 179:
+        primitiveGreaterThan()
+    | 180:
+        primitiveLessOrEqual()
+    | 181:
+        primitiveGreaterOrEqual()
+    | 182:
+        primitiveEqual()
+    | 183:
+        primitiveNotEqual()
+    | 184:
+        primitiveMultiply()
+    | 185:
+        primitiveDivide()
+    | 186:
+        primitiveMod()
+    | 187:
+        primitiveMakePoint()
+    | 188:
+        primitiveBitShift()
+    | 189:
+        primitiveDiv()
+    | 190:
+        primitiveBitAnd()
+    | 191:
+        primitiveBitOr()
+    end
+  end arithmeticSelectorPrimitive
+  
+  procedure successUpdate(res: boolean) inline
+  begin
+    success := success and res
+  end successUpdate
+
+	procedure primitiveAdd()
+	var integerArgument, integerReceiver: integer
+	begin 
+  	TRACE_PRIMITIVE("")
+    integerArgument := popInteger()
+    if not success then unPop(2) return end
+    integerReceiver := popInteger()
+    if not success then unPop(2) return end
+    pushInteger( integerReceiver + integerArgument )
+    // NOTE: original isIntegerValue(result)
+	end primitiveAdd
+
+	procedure primitiveSubtract()
+	var integerArgument, integerReceiver: integer
+	begin 
+  	TRACE_PRIMITIVE("")
+    integerArgument := popInteger()
+    if not success then unPop(2) return end
+    integerReceiver := popInteger()
+    if not success then unPop(2) return end
+    pushInteger( integerReceiver - integerArgument )
+    // NOTE: original isIntegerValue(result)
+	end primitiveSubtract
+
+	procedure primitiveLessThan()
+	var integerArgument, integerReceiver: integer
+	begin 
+    TRACE_PRIMITIVE("")
+    integerArgument := popInteger()
+    integerReceiver := popInteger()
+    if success then
+      if integerReceiver < integerArgument then 
+        push(OM.objectTrue) else push(OM.objectFalse) end
+    else unPop(2) end
+	end primitiveLessThan
+
+	procedure primitiveGreaterThan()
+	var integerArgument, integerReceiver: integer
+	begin 
+    TRACE_PRIMITIVE("")
+    integerArgument := popInteger()
+    integerReceiver := popInteger()
+    if success then
+      if integerReceiver > integerArgument then 
+        push(OM.objectTrue) else push(OM.objectFalse) end
+    else unPop(2) end
+	end primitiveGreaterThan
+
+	procedure primitiveLessOrEqual()
+	var integerArgument, integerReceiver: integer
+	begin 
+    TRACE_PRIMITIVE("")
+    integerArgument := popInteger()
+    integerReceiver := popInteger()
+    if success then
+      if integerReceiver <= integerArgument then 
+        push(OM.objectTrue) else push(OM.objectFalse) end
+    else unPop(2) end
+	end primitiveLessOrEqual
+
+	procedure primitiveGreaterOrEqual()
+	var integerArgument, integerReceiver: integer
+	begin 
+    TRACE_PRIMITIVE("")
+    integerArgument := popInteger()
+    integerReceiver := popInteger()
+    if success then
+      if integerReceiver >= integerArgument then 
+        push(OM.objectTrue) else push(OM.objectFalse) end
+    else unPop(2) end
+	end primitiveGreaterOrEqual
+
+	procedure primitiveEqual()
+	var integerArgument, integerReceiver: integer
+	begin 
+    TRACE_PRIMITIVE("")
+    integerArgument := popInteger()
+    integerReceiver := popInteger()
+    if success then
+      if integerReceiver = integerArgument then 
+        push(OM.objectTrue) else push(OM.objectFalse) end
+    else unPop(2) end
+	end primitiveEqual
+
+	procedure primitiveNotEqual()
+	var integerArgument, integerReceiver: integer
+	begin 
+    TRACE_PRIMITIVE("")
+    integerArgument := popInteger()
+    integerReceiver := popInteger()
+    if success then
+      if integerReceiver # integerArgument then 
+        push(OM.objectTrue) else push(OM.objectFalse) end
+    else unPop(2) end
+	end primitiveNotEqual
+
+	procedure primitiveMultiply()
+	var integerArgument, integerReceiver: integer
+	begin 
+  	TRACE_PRIMITIVE("")
+    integerArgument := popInteger()
+    if not success then unPop(2) return end
+    integerReceiver := popInteger()
+    if not success then unPop(2) return end
+    pushInteger( integerReceiver * integerArgument ) 
+    // NOTE: original isIntegerValue(result)
+	end primitiveMultiply
+
+	procedure primitiveDivide()
+	var integerArgument, integerReceiver, integerResult: integer
+	begin 
+    TRACE_PRIMITIVE("")
+    integerArgument := popInteger()
+    integerReceiver := popInteger()
+    successUpdate( integerArgument # 0 )
+    successUpdate( (integerArgument # 0) and (integerReceiver mod integerArgument = 0) )
+    integerResult := 0
+    if success then
+      integerResult := integerReceiver div integerArgument
+      successUpdate( OM.isIntegerValue(integerResult) )
+    end
+    if success then
+      push( OM.integerObjectOf( integerResult ) )
+    else unPop(2) end
+	end primitiveDivide
+
+	procedure primitiveMod()
+	var integerArgument, integerReceiver, integerResult: integer
+	begin 
+    TRACE_PRIMITIVE("")
+    integerArgument := popInteger()
+    integerReceiver := popInteger()
+    successUpdate( integerArgument # 0 )
+    integerResult := 0
+    if success then
+      integerResult := integerReceiver mod integerArgument
+      successUpdate( OM.isIntegerValue(integerResult) )
+    end
+    if success then
+      pushInteger( integerResult )
+    else unPop(2) end
+	end primitiveMod
+
+	procedure primitiveMakePoint()
+	var integerArgument, integerReceiver, pointResult: OOP
+	begin 
+    TRACE_PRIMITIVE("")
+    integerArgument := popStack()
+    integerReceiver := popStack()
+    successUpdate( OM.isIntegerObject(integerArgument) ) // BB error; apparently arg is an OOP, see also primitiveMousePoint
+    successUpdate( OM.isIntegerObject(integerReceiver) )
+    if success then
+      pointResult := OM.instantiateClassWithPointers( OM.classPoint, ClassPointSize )
+      OM.storePointerOfObject( XIndex, pointResult, integerReceiver )
+      OM.storePointerOfObject( YIndex, pointResult, integerArgument )
+      push( pointResult )
+    else unPop(2) end
+	end primitiveMakePoint
+
+	procedure primitiveBitShift()
+	var integerArgument, integerReceiver, integerResult: integer
+	begin 
+    TRACE_PRIMITIVE("")
+    integerArgument := popInteger()
+    integerReceiver := popInteger()
+    integerResult := 0
+    if success then
+      integerResult := bitShift( integerReceiver, integerArgument )
+      successUpdate( OM.isIntegerValue(integerResult) )
+    end
+    if success then
+      pushInteger( integerResult )
+    else unPop(2) end
+	end primitiveBitShift
+
+  procedure bitShift(wordToShift, offset: integer): integer
+  var tmp, tmp2: integer
+  begin
+    if offset >= 0 then return bitshl(wordToShift, offset) end
+    offset := -offset
+    if wordToShift < 0 then
+      tmp := wordToShift
+      tmp2 := -bitshr( bitand(wordToShift, bitshl(1, 15)), offset)
+      return bitor(bitshr(tmp, offset), tmp2)
+    else
+      return bitshr(wordToShift, offset)
+    end
+  end bitShift
+  
+	procedure primitiveDiv()
+	var integerArgument, integerReceiver, integerResult: integer
+	begin 
+    TRACE_PRIMITIVE("")
+    integerArgument := popInteger()
+    integerReceiver := popInteger()
+    successUpdate( integerArgument # 0 )
+    integerResult := 0
+    if success then
+      integerResult := integerReceiver div integerArgument
+      successUpdate( OM.isIntegerValue(integerResult) )
+    end
+    if success then
+      pushInteger( integerResult )
+    else unPop(2) end
+	end primitiveDiv
+
+	procedure primitiveBitAnd()
+	var integerArgument, integerReceiver, integerResult: integer
+	begin 
+    TRACE_PRIMITIVE("")
+    integerArgument := popInteger()
+    integerReceiver := popInteger()
+    integerResult := 0
+    if success then
+      integerResult := bitand(integerReceiver, integerArgument)
+    end
+    if success then
+      pushInteger( integerResult )
+    else unPop(2) end
+	end primitiveBitAnd
+
+	procedure primitiveBitOr()
+	var integerArgument, integerReceiver, integerResult: integer
+	begin 
+    TRACE_PRIMITIVE("")
+    integerArgument := popInteger()
+    integerReceiver := popInteger()
+    integerResult := 0
+    if success then
+      integerResult := bitor(integerReceiver, integerArgument)
+    end
+    if success then
+      pushInteger( integerResult )
+    else unPop(2) end
+	end primitiveBitOr
+	
+  procedure commonSelectorPrimitive()
+  var receiverClass: OOP
+  begin 
+    argumentCount := fetchIntegerOfObject( (currentBytecode - 176) * 2 + 1, OM.specialSelectors )
+    receiverClass := OM.fetchClassOf( stackValue( argumentCount ) )
+    case currentBytecode of
+    | 198:
+        primitiveEquivalent()
+    | 199:
+        primitiveClass()
+    | 200:
+        successUpdate( (receiverClass = OM.classMethodContext) or
+                       (receiverClass = OM.classBlockContext) )
+        if success then primitiveBlockCopy() end
+    | 201, 202:
+        successUpdate( receiverClass = OM.classBlockContext )
+        if success then primitiveValue() end
+    else
+        primitiveFail()
+    end
+  end commonSelectorPrimitive
+  
+  procedure sendLiteralSelectorBytecode()
+  var litNr, argumentCount: integer; selector: OOP
+  begin 
+    litNr := OM.extractBits( 12, 15, currentBytecode )
+    selector := literal( litNr )
+    argumentCount := OM.extractBits( 10, 11, currentBytecode ) - 1
+    TRACE_BYTECODE("selector: " + OM.prettyValue(selector) + " count: " + tostring(argumentCount) )
+    sendSelector( selector, argumentCount )
+  end sendLiteralSelectorBytecode
+  
+  procedure sendSelector(selector: OOP; count: integer)
+  var newReceiver: OOP
+  begin 
+    OM.setRegister(MessageSelector, selector )
+    argumentCount := count
+    newReceiver := stackValue(argumentCount)
+    if newReceiver # 0 then // deviation from BB
+        sendSelectorToClass( OM.fetchClassOf(newReceiver) )
+    else
+        print("ERROR: sendSelector ") print(OM.fetchByteString(selector))
+        print(" to zero receiver at stack slot ")println(stackPointer - count)
+        //dumpStack_("sendSelector")
+    end
+  end sendSelector
+  
+  procedure stackValue(offset: integer): OOP
+  begin
+    return OM.fetchPointerOfObject( stackPointer - offset, OM.getRegister(ActiveContext) )
+  end stackValue
+  
+  procedure literal(offset: integer): integer
+  begin
+    return OM.literalOfMethod( offset, OM.getRegister(Method) )
+  end literal
+  
+  procedure jumpBytecode() inline
+  begin 
+    case currentBytecode of
+    | 144 .. 151 :
+        shortUnconditionalJump()
+    | 152 .. 159 :
+        shortContidionalJump()
+    | 160 .. 167 :
+        longUnconditionalJump()
+    | 168 .. 175 :
+        longConditionalJump()
+    end
+  end jumpBytecode
+  
+  procedure shortUnconditionalJump()
+  var offset: integer
+  begin 
+    offset := OM.extractBits( 13, 15, currentBytecode )
+    TRACE_BYTECODE("offset: " + tostring(offset + 1) )
+    jump( offset + 1 )
+  end shortUnconditionalJump
+  
+  procedure shortContidionalJump()
+  var offset: integer
+  begin 
+    offset := OM.extractBits( 13, 15, currentBytecode )
+    TRACE_BYTECODE("offset: " + tostring(offset + 1) )
+    jumpif( OM.objectFalse, offset + 1 )
+  end shortContidionalJump
+  
+  procedure longUnconditionalJump()
+  var offset: integer
+  begin 
+    offset := OM.extractBits( 13, 15, currentBytecode )
+    offset := ( offset - 4 ) * 256 + fetchByte()
+    TRACE_BYTECODE("offset: " + tostring(offset) )
+    jump( offset )
+  end longUnconditionalJump
+  
+  procedure jump(offset: integer)
+  begin
+    instructionPointer := instructionPointer + offset
+  end jump
+  
+  procedure longConditionalJump()
+  var offset: integer
+  begin 
+    offset := OM.extractBits( 14, 15, currentBytecode )
+    offset := offset * 256 + fetchByte()
+    TRACE_BYTECODE("offset: " + tostring(offset) )
+    if (currentBytecode >= 168) and (currentBytecode <= 171) then
+        jumpif( OM.objectTrue, offset )
+    elsif (currentBytecode >= 172) and (currentBytecode <= 175) then
+        jumpif( OM.objectFalse, offset )
+    end
+  end longConditionalJump
+  
+  procedure jumpif(condition, offset: integer)
+  var value: integer
+  begin 
+    value := popStack()
+    if value = condition then
+        jump(offset)
+    elsif not ( (value = OM.objectTrue) or (value = OM.objectFalse) ) then
+        unPop(1)
+        sendMustBeBoolean()
+    end
+  end jumpif
+  
+  procedure sendMustBeBoolean()
+  begin
+    sendSelector( OM.symbolMustBeBoolean, 0 )
+  end sendMustBeBoolean
+  
+  procedure unPop(number: integer)
+  begin
+    stackPointer := stackPointer + number
+  end unPop
+  
+  procedure TRACE_BYTECODE(str: string)
+  begin
+    print("Bytecode <")print(currentBytecode)print("> ")println(str)
+  end TRACE_BYTECODE
+  
+  procedure TRACE_PRIMITIVE(str: string)
+  begin
+    print("Primitive #")print(primitiveIndex)print(" ")println(str)
+  end TRACE_PRIMITIVE
+  
+begin
+  new(semaphoreList) semaphoreIndex := -1
+end Interpreter

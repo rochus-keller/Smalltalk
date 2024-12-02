@@ -1,0 +1,267 @@
+(*
+* Copyright 2024 Rochus Keller <mailto:me@rochus-keller.ch>
+*
+* This file is part of the Luon Smalltalk-80 VM.
+*
+* The following is the license that applies to this copy of the
+* application. For a license to use the application under conditions
+* other than those described here, please email to me@rochus-keller.ch.
+*
+* GNU General Public License Usage
+* This file may be used under the terms of the GNU General Public
+* License (GPL) versions 2.0 or 3.0 as published by the Free Software
+* Foundation and appearing in the file LICENSE.GPL included in
+* the packaging of this file. Please review the following information
+* to ensure GNU General Public Licensing requirements will be met:
+* http://www.fsf.org/licensing/licenses/info/GPLv2.html and
+* http://www.gnu.org/copyleft/gpl.html.
+*)
+
+// migrated from the C++ version
+
+module BitBlt
+
+import D := Display
+
+  // This is a textbook implementation according to Blue Book chapter 18 "Simulation of BitBlt".
+  // Known to be inefficient; focus is on functionality and compliance.
+
+var
+  sourceBits*: D.Bitmap
+  destBits*: D.Bitmap
+  halftoneBits*: D.Bitmap
+  combinationRule*: integer
+  destX*, clipX*, clipWidth*, sourceX*, width*: integer
+  destY*, clipY*, clipHeight*, sourceY*, height*: integer
+  
+  sourceRaster: integer
+  destRaster: integer
+  skew, nWords, vDir, hDir: integer
+  mask1, mask2, skewMask: integer
+  sx, sy, dx, dy, w, h: integer // pixel
+  sourceIndex, destIndex, sourceDelta, destDelta: integer
+  preload: boolean
+  RightMasks: array of integer
+  
+const
+  AllOnes = 0ffffh
+  
+  procedure copyBits*()
+  begin 
+    clipRange()
+    if (w <= 0) or (h <= 0) then return end
+    computeMasks()
+    checkOverlap()
+    calculateOffsets()
+    copyLoop()
+  end copyBits
+  
+  procedure clipRange()
+  begin 
+    // set sx/y, dx/y, w and h so that dest doesn't exceed clipping range and
+    // source only covers what needed by clipped dest
+    if destX >= clipX  then
+        sx := sourceX
+        dx := destX
+        w := width
+    else
+        sx := sourceX + ( clipX - destX )
+        w := width - ( clipX - destX )
+        dx := clipX
+    end
+    if ( dx + w ) > ( clipX + clipWidth ) then
+        w := w - ( ( dx + w ) - ( clipX + clipWidth ) )
+    end
+    if destY >= clipY then
+        sy := sourceY
+        dy := destY
+        h := height
+    else
+        sy := sourceY + clipY - destY
+        h := height - clipY + destY
+        dy := clipY
+    end
+    if ( dy + h ) > ( clipY + clipHeight ) then
+        h := h - ( ( dy + h ) - ( clipY + clipHeight ) )
+    end
+
+    if sourceBits = nil then return end
+
+    if sx < 0 then
+        dx := dx - sx;
+        w := w + sx;
+        sx := 0;
+    end
+    if ( sx + w ) > sourceBits.pixWidth then
+        w := w - ( sx + w - sourceBits.pixWidth )
+    end
+    if sy < 0 then
+        dy := dy - sy
+        h := h + sy
+        sy := 0
+    end
+    if ( sy + h ) > sourceBits.pixHeight then
+        h := h - ( sy + h - sourceBits.pixHeight )
+    end
+  end clipRange
+  
+  procedure computeMasks()
+  var startBits, endBits: integer
+  begin 
+    // destBits = destForm bits
+    destRaster := ( ( destBits.pixWidth - 1 ) div 16 ) + 1
+    if sourceBits # nil then
+        sourceRaster := ( ( sourceBits.pixWidth - 1 ) div 16 ) + 1
+    else
+        sourceRaster := 0
+    end
+    // halftoneBits = halftoneForm bits
+    skew := bitand(( sx - dx ), 15)
+    startBits := 16 - bitand( dx, 15 )
+    mask1 := RightMasks[ startBits (* + 1 *) ] // ST array index starts with 1
+    endBits := 15 - bitand( ( dx + w - 1 ), 15 )
+    mask2 := bitnot(RightMasks[ endBits (* + 1 *) ])
+    if skew = 0 then skewMask := 0 else skewMask := RightMasks[ 16 - skew (* + 1 *) ] end
+
+    if w < startBits then
+        mask1 := bitand(mask1, mask2)
+        mask2 := 0
+        nWords := 1
+    else
+        // nWords = ( w - startBits - 1 ) / 16 + 2; // BB error, doesn't work
+        // fix found in https://github.com/dbanay/Smalltalk/blob/master/src/bitblt.cpp
+        // ERROR dbanay : nWords <-  (w - startBits + 15) // 16 + 1 for False case"
+        nWords := ( w - startBits + 15) div 16 + 1
+    end
+  end computeMasks
+  
+  procedure checkOverlap()
+  var t: integer
+  begin 
+    hDir := 1; vDir := 1
+    if (sourceBits # nil) and (destBits # nil) and (sourceBits.buffer = destBits) and (dy >= sy) then
+        if dy > sy then
+            vDir := -1
+            sy := sy + h - 1
+            dy := dy + h - 1
+        elsif dx > sx then
+            hDir := -1
+            sx := sx + w - 1
+            dx := dx + w - 1
+            skewMask := bitnot(skewMask)
+            t := mask1
+            mask1 := mask2
+            mask2 := t
+        end
+    end
+  end checkOverlap
+  
+  procedure calculateOffsets()
+  begin 
+    preload := (sourceBits # nil) and (skew # 0) and (skew <= bitand( sx, 15 ) )
+    if hDir < 0 then preload := preload = false end
+    sourceIndex := sy * sourceRaster + ( sx div 16 )
+    destIndex := dy * destRaster + ( dx div 16 )
+    sourceDelta := ( sourceRaster * vDir ) - ( (nWords + ord(preload) ) * hDir )
+    destDelta := ( destRaster * vDir ) - ( nWords * hDir )
+  end calculateOffsets
+  
+  procedure copyLoop()
+  var prevWord, thisWord, skewWord, mergeMask,
+            halftoneWord, mergeWord, word, i, destWord: integer
+  begin 
+    for i := 1 to h do
+        if halftoneBits # nil then
+            halftoneWord := D.wordAt(halftoneBits, 1 + bitand( dy, 15 ) )
+            dy := dy + vDir
+        else
+            halftoneWord := AllOnes
+        end
+        skewWord := halftoneWord
+        if preload and (sourceBits # nil) then
+            prevWord := D.wordAt(sourceBits, sourceIndex + 1 )
+            sourceIndex := sourceIndex + hDir
+        else
+            prevWord := 0
+        end
+        mergeMask := mask1
+        for word := 1 to nWords do
+            if sourceBits # nil then
+                prevWord := bitand(prevWord, skewMask)
+                if (word <= sourceRaster) and (sourceIndex >= 0) 
+                        and (sourceIndex < len(sourceBits.buffer) div 2 ) then
+                    thisWord := D.wordAt(sourceBits, sourceIndex + 1 ) 
+                else
+                    thisWord := 0
+                end
+                skewWord := bitor( prevWord, bitand( thisWord, bitnot(skewMask) ) )
+                prevWord := thisWord
+                skewWord := bitor( bitshl( skewWord, skew ), bitshr( skewWord, -( skew - 16 ) ) )
+            end
+            if destIndex >= len(destBits.buffer) div 2 then return end
+            destWord := D.wordAt(destBits, destIndex + 1 )
+            mergeWord := merge( combinationRule, bitand(skewWord, halftoneWord), destWord )
+            D.wordAtPut(destBits, destIndex + 1, 
+                bitor( bitand(mergeMask, mergeWord), bitand( bitnot(mergeMask), destWord ) ) )
+            sourceIndex := sourceIndex + hDir
+            destIndex := destIndex + hDir
+            if word = ( nWords - 1 ) then
+                mergeMask := mask2
+            else
+                mergeMask := AllOnes
+            end
+        end
+        sourceIndex := sourceIndex + sourceDelta
+        destIndex := destIndex + destDelta
+    end
+  end copyLoop
+  
+  procedure merge(combinationRule, source, destination: integer): integer
+  begin
+    case combinationRule of
+    | 0:
+        return 0
+    | 1:
+        return bitand(source, destination)
+    | 2:
+        return bitand(source, bitnot(destination))
+    | 3:
+        return source
+    | 4:
+        return bitand( bitnot(source), destination)
+    | 5:
+        return destination
+    | 6:
+        return bitxor(source, destination)
+    | 7:
+        return bitor(source, destination)
+    | 8:
+        return bitand( bitnot(source), bitnot(destination) )
+    | 9:
+        return bitxor( bitnot(source), destination )
+    | 10:
+        return bitnot(destination)
+    | 11:
+        return bitor(source, bitnot(destination))
+    | 12:
+        return bitnot(source)
+    | 13:
+        return bitor( bitnot(source), destination)
+    | 14:
+        return bitor( bitnot(source), bitnot(destination) )
+    | 15:
+        return AllOnes;
+    else
+        assert( false )
+    end
+    return 0
+  end merge
+  
+begin
+  RightMasks := { 
+      0, 01h, 03h, 07h, 0fh,
+      01fh, 03fh, 07fh, 0ffh,
+      01ffh, 03ffh, 0h7ffh, 0fffh,
+      01fffh, 03fffh, 07fffh, 0ffffh }
+       
+end BitBlt

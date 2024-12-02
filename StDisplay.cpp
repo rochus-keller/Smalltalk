@@ -704,7 +704,8 @@ void Bitmap::toImage(QImage& img, QRect area) const
 {
     if( isNull() )
         return;
-    Q_ASSERT( img.format() == QImage::Format_RGB32 && img.width() == d_pixWidth && img.height() == d_pixHeight );
+    Q_ASSERT( img.format() == QImage::Format_RGB32 // The image is stored using a 32-bit RGB format (0xffRRGGBB).
+              && img.width() == d_pixWidth && img.height() == d_pixHeight );
     // more efficient than Mono because the Qt pipeline has to convert it otherwise
 
     if( area.isNull() )

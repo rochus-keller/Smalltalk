@@ -1,0 +1,73 @@
+(*
+* Copyright 2024 Rochus Keller <mailto:me@rochus-keller.ch>
+*
+* This file is part of the Luon Smalltalk-80 VM.
+*
+* The following is the license that applies to this copy of the
+* application. For a license to use the application under conditions
+* other than those described here, please email to me@rochus-keller.ch.
+*
+* GNU General Public License Usage
+* This file may be used under the terms of the GNU General Public
+* License (GPL) versions 2.0 or 3.0 as published by the Free Software
+* Foundation and appearing in the file LICENSE.GPL included in
+* the packaging of this file. Please review the following information
+* to ensure GNU General Public Licensing requirements will be met:
+* http://www.fsf.org/licensing/licenses/info/GPLv2.html and
+* http://www.gnu.org/copyleft/gpl.html.
+*)
+
+// migrated from the C++ version
+
+module Display
+
+const
+    PixPerByte = 8; PixPerWord = 16
+    
+type 
+    Bitmap* = record 
+                pixWidth, pixHeight, pixLineWidth, wordLen: integer
+                buffer: array of byte
+              end
+    Rect = record x, y, w, h: integer end
+              
+var run* : boolean
+
+  procedure processEvents*() extern
+  procedure nextEvent(): integer extern
+  procedure setCursorPos*(x,y: integer) extern
+  procedure setCursorBitmap*(bm: Bitmap) extern 
+  procedure setScreenBitmap*(bm: Bitmap) extern 
+  procedure getScreenBitmap*(): Bitmap extern
+  procedure updateArea*(r: Rect) end // TODO
+  procedure intersect(a,b: Rect): Rect end // TODO
+  procedure getTicks(): integer extern
+  
+  procedure createBitmap*(bs: array of byte; wordLen, pixWidth, pixHeight: integer): Bitmap
+  var bm: Bitmap
+  begin
+    new(bm)
+    bm.buffer := bs
+    bm.wordLen := wordLen
+    bm.pixWidth := pixWidth
+    bm.pixHeight := pixHeight
+    bm.pixLineWidth := ( ( bm.pixWidth + PixPerWord - 1 ) div PixPerWord ) * PixPerWord; 
+    // line width is a multiple of 16
+    assert( bm.pixLineWidth * bm.pixHeight div 16 = bm.wordLen )
+    return bm
+  end createBitmap
+  
+  procedure wordAt*(bm: Bitmap; i: integer): integer
+  begin
+    dec(i) // Smalltalk array indexes start with 1
+    return bitshl(bm.buffer[i], 8 ) + bm.buffer[i+1]
+  end wordAt
+  
+  procedure wordAtPut*(bm: Bitmap; i, v: integer)
+  begin
+    dec(i)
+    bm.buffer[i] := clip(bitand( bitshr( v, 8 ), 0ffh ))
+    bm.buffer[i+1] := clip(bitand( v, 0ffh ))
+  end wordAtPut
+
+end Display

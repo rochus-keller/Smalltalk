@@ -1,0 +1,777 @@
+(*
+* Copyright 2024 Rochus Keller <mailto:me@rochus-keller.ch>
+*
+* This file is part of the Luon Smalltalk-80 VM.
+*
+* The following is the license that applies to this copy of the
+* application. For a license to use the application under conditions
+* other than those described here, please email to me@rochus-keller.ch.
+*
+* GNU General Public License Usage
+* This file may be used under the terms of the GNU General Public
+* License (GPL) versions 2.0 or 3.0 as published by the Free Software
+* Foundation and appearing in the file LICENSE.GPL included in
+* the packaging of this file. Please review the following information
+* to ensure GNU General Public Licensing requirements will be met:
+* http://www.fsf.org/licensing/licenses/info/GPLv2.html and
+* http://www.gnu.org/copyleft/gpl.html.
+*)
+
+// migrated from the C++ version
+
+module ObjectMemory
+  import Files
+  
+const
+    // Objects known to the interpreter
+      // small integers:
+      objectMinusOne* = 65535
+      objectZero* = 1
+      objectOne* = 3
+      objectTwo* = 5
+      // undefined, boolean
+      objectNil* = 02h
+      objectFalse* = 04h
+      objectTrue* = 06h
+      // root:
+      processor* = 08h // an Association whose value field is Processor, SchedulerAssociationPointer
+      smalltalk* = 012h // an Association whose value field is SystemDirectory
+      // classes:
+      classSmallInteger* = 0ch // max 16383 (16384), min -16384 (-16385), bits 14, bytes 2
+      classString* = 0eh
+      classArray* = 10h
+      classFloat* = 014h
+      classMethodContext* = 016h
+      classBlockContext* = 018h
+      classPoint* = 01ah
+      classLargePositiveInteger* = 01ch
+      classDisplayBitmap* = 01eh
+      classMessage* = 020h
+      classCompiledMethod* = 022h
+      classSemaphore* = 026h
+      classCharacter* = 028h
+      // symbols:
+      symbolTable* = 00ah // symbol class variable USTable
+      symbolDoesNotUnderstand* = 02ah
+      symbolCannotReturn* = 02ch
+      symbolMonitor* = 02eh
+      symbolUnusedOop18* = 024h
+      symbolMustBeBoolean* = 034h
+      // selectors:
+      specialSelectors* = 030h // SystemDictionary class variable, the array of selectors for bytecodes 260-317 octal
+      characterTable* = 032h // Character class variable, table of characters
+      // extra knowns:
+      classSymbol* = 038h
+      classMethodDictionary* = 04ch
+      classLargeNegativeInteger* = 01da0h
+      classProcess* = 07a4h
+      classAssociation* = 084h
+      currentSelection* = 02392h // ParagraphEditor.CurrentSelection
+
+    // compiled method flags:
+      ZeroArguments* = 0
+      OneArgument* = 1
+      TwoArguments* = 2
+      ThreeArguments* = 3
+      FourArguments* = 4
+      ZeroArgPrimitiveReturnSelf* = 5 // no bytecode
+      ZeroArgPrimitiveReturnVar* = 6 // methodTemporaryCount returns index of the instance var to return, no bytecode
+      HeaderExtension* = 7
+      
+      ValueIndex = 1
+      methHdrByteLen = 2
+
+type 
+      OOP = integer // only 16 bit used
+      ByteArray = array of byte
+      
+const
+      HeaderSize = 4
+      ClsMsb = 0
+      ClsLsb = 1
+      OddFlag = 2
+      PtrFlag = 3
+type
+      Object = ByteArray      
+var
+      slots : array of Object
+      registers : array 10 of integer
+      temps : hashmap OOP of boolean
+
+  procedure loadFromFile*(path: string):boolean
+  var f: Files.File; bytes, objectSpace, objectTable: ByteArray
+      objectSpaceLenWords, objectSpaceLenBytes, 
+      objectTableLenWords, objectTableLenBytes, size,
+      numOfPages, off, i: integer
+      
+    procedure readSlot( objectTable, objectSpace: ByteArray; i: integer )
+    var flags, loc, seg, addr, wordLen, byteLen, cls, slotNr: integer
+        obj: Object
+    
+      procedure isFree(flag: integer):boolean inline
+      begin
+        return bitand(flag, 020h) # 0
+      end isFree
+
+      procedure isPtr(flag: integer):boolean inline
+      begin
+        return bitand(flag, 040h) # 0
+      end isPtr
+     
+      procedure isOdd(flag: integer):boolean inline
+      begin
+        return bitand(flag, 080h) # 0
+      end isOdd
+     
+    begin
+      flags := objectTable[i+1]
+      if not isFree(flags) then
+        loc := readU16(objectTable,i+2) // loc is the word index, not byte index
+        
+        seg := bitand(flags, 0fh) // segment number
+        
+        // in Bits of History page 49: each segment contains 64k words (not bytes)
+        addr := bitshl(seg, 17) + bitshl(loc, 1)
+        wordLen := readU16(objectSpace, addr) - 2 // without header
+        assert(wordLen < bitshr(0ffffh, 1))
+        byteLen := wordLen * 2
+        
+        cls := readU16(objectSpace, addr + 2 )
+        
+        // OOP are only even number, slotNr are also odd number, so OOP/2, i.e. i/4
+        slotNr := bitshr(i, 2) 
+        
+        obj := allocate( slotNr, byteLen, cls, isPtr(flags), isOdd(flags) )        
+        // copy bytes
+        for i := 0 to byteLen-1 do
+          obj[HeaderSize+i] := objectSpace[addr+4+i]
+        end
+      end
+    end readSlot
+    
+  begin
+    f := Files.Open(path)
+    if f = nil then
+      println("cannot open file")
+      return false
+    end
+    new(bytes,10)
+    
+    Files.ReadBytes(f, bytes, 4)
+    objectSpaceLenWords := readU32(bytes,0)
+    objectSpaceLenBytes := objectSpaceLenWords * 2
+    Files.ReadBytes(f, bytes, 4)
+    objectTableLenWords := readU32(bytes,0)
+    objectTableLenBytes := objectTableLenWords * 2
+    
+    size := Files.ReadBytes(f, bytes, 2)  
+    if (size # 2) or (bytes[0] # 0) or (bytes[1] # 0) then
+      return false // not in interchange format
+    end
+
+    Files.Seek(f, Files.Length(f) - 10)
+    size := Files.ReadBytes(f, bytes, 10)
+    
+    if (size # 10) or (bytes[3] # 020h) or (bytes[6] # 001h) or
+            (bytes[7] # 043h) or (bytes[8] # 0f3h) or (bytes[9] # 03bh) then
+      return false
+    end
+
+    Files.Seek(f, 512)
+    
+    // Object Space format:
+    // | xxxxxxxx xxxxxxxx | word length
+    // | xxxxxxxx xxxxxxxx | class
+    // | payload of word lenght - 2
+    new(objectSpace,objectSpaceLenBytes)
+    size := Files.ReadBytes(f, objectSpace, objectSpaceLenBytes)
+    if size # objectSpaceLenBytes then return false end
+    
+    numOfPages := objectSpaceLenBytes div 512
+    off := 512 + ( numOfPages + 1 ) * 512
+    Files.Seek(f, off)
+   
+    // Object Table format:
+    // | xxxxxxxx | count, unused
+    // | ffffssss | flags, segment
+    // | llllllll llllllll | location
+    new(objectTable, objectTableLenBytes)
+    size := Files.ReadBytes(f, objectTable, objectTableLenBytes)
+    if size # objectTableLenBytes then return false end
+    
+    for i := 0 to objectTableLenBytes-1 by 4 do
+      readSlot(objectTable, objectSpace, i)
+    end
+   
+    // TODO
+    // updateRefs()
+  end loadFromFile
+  
+  procedure allocate(slot, numOfBytes: integer; cls: OOP; isPtr, isOdd: boolean): Object
+  var byteLen: integer; ptr: Object
+  begin 
+    // header
+    // 1: cls msb
+    // 2: cls lsb
+    // 3: isodd
+    // 4: isptr
+    // ... bytes of object
+    assert( (slot < len(slots)) and (slots[slot] = nil) )
+    byteLen := HeaderSize + numOfBytes
+    new(ptr, byteLen) 
+    ptr[OddFlag] := clip(ord(isOdd))
+    ptr[PtrFlag] := clip(ord(isPtr))
+    cls := bitshr(cls, 1)
+    //ptr[ClsMsb] := clip(bitshr(cls,8))
+    //ptr[ClsLsb] := clip(bitand(cls,0ffh))
+    writeU16(ptr, ClsMsb, cls)
+    slots[slot] := ptr
+    return ptr
+  end allocate
+  
+  procedure getClass(obj: Object): OOP inline
+  begin
+    return bitshl(readU16(obj, ClsMsb), 1)
+  end getClass
+  
+  procedure readU32(data: ByteArray; off: integer):integer inline
+  begin
+      return bitshl(data[0+off], 24 ) + bitshl(data[1+off], 16 ) +
+            bitshl(data[2+off], 8 ) + data[3+off];
+  end readU32
+  
+  procedure readU16(data: ByteArray; off: integer): integer inline
+  begin
+    return bitshl(data[off], 8) + data[off+1]
+  end readU16
+  
+  procedure writeU16(data: ByteArray; off, value: integer)
+  begin
+    data[off] := clip(bitshr(value,8))
+    data[off+1] := clip(bitand(value,0ffh))
+  end writeU16
+  
+  procedure isInt(ptr: integer ): boolean inline
+  begin
+    return bitand(ptr, 1) # 0 
+  end isInt
+  
+  procedure getSlot(oop: OOP): Object inline
+  begin
+    return slots[ bitshr(oop,1) ]
+  end getSlot
+  
+  procedure fetchClassOf*(objectPointer: OOP): OOP
+  var obj : Object
+  begin
+    if isInt(objectPointer) then return classSmallInteger end
+    obj := getSlot(objectPointer)
+    if obj # nil then return bitshl(readU16(obj,0),1) else return 0 end
+  end fetchClassOf
+  
+  procedure fetchWordLenghtOf*(objectPointer: OOP): integer 
+  var obj : Object
+  begin
+    if isInt(objectPointer) then return 0 end
+    obj := getSlot(objectPointer)
+    if obj = nil then return 0 end
+    return (len(obj) - HeaderSize) div 2
+  end fetchWordLenghtOf
+  
+  procedure fetchByteLenghtOf*(objectPointer: OOP): integer 
+  var obj : Object; off: integer
+  begin
+    if isInt(objectPointer) then return 0 end
+    obj := getSlot(objectPointer)
+    if obj = nil then return 0 end
+    if obj[OddFlag] # 0 then off := 1 else off := 0 end
+    return len(obj) - HeaderSize - off
+  end fetchByteLenghtOf
+  
+  procedure fetchWordOfObject*(fieldIndex: integer; objectPointer: OOP): integer 
+  var obj : Object
+  begin
+    if objectPointer = objectNil then return 0 end
+    obj := getSlot(objectPointer)
+    if obj = nil then return 0 end
+    return readU16( obj, HeaderSize + fieldIndex * 2 )
+  end fetchWordOfObject
+  
+  procedure fetchPointerOfObject*(fieldIndex: integer; objectPointer: OOP): OOP 
+  var obj : Object; off: integer; oop: OOP
+  begin
+    if objectPointer = objectNil then return objectNil end
+    obj := getSlot(objectPointer)
+    if obj = nil then return objectNil end
+    off := fieldIndex * 2
+    oop := readU16( obj, HeaderSize + off );
+    if oop = 0 then // BB (implicitly?) assumes that unused members are nil
+      return objectNil
+    else
+      return oop
+    end
+  end fetchPointerOfObject
+  
+  procedure storePointerOfObject*(fieldIndex: integer; objectPointer, withValue: OOP) 
+  var obj : Object; off: integer
+  begin
+    assert(objectPointer # 0)
+    if objectPointer = objectNil then return end
+    obj := getSlot(objectPointer)
+    if obj = nil then return end
+    off := fieldIndex * 2
+    writeU16(obj, HeaderSize + off, withValue)
+  end storePointerOfObject
+  
+  procedure fetchByteOfObject*(byteIndex: integer; objectPointer: OOP): byte 
+  var obj : Object; off: integer
+  begin
+    if objectPointer = objectNil then return 0 end
+    obj := getSlot(objectPointer)
+    if obj = nil then return 0 end
+    off := byteIndex
+    return obj[HeaderSize + off]
+  end fetchByteOfObject
+    
+  procedure storeByteOfObject*(byteIndex: integer; objectPointer: OOP; withValue: byte) 
+  var obj : Object; off: integer
+  begin
+    obj := getSlot(objectPointer)
+    if obj = nil then return end
+    off := byteIndex
+    obj[HeaderSize + off] := withValue
+  end storeByteOfObject
+  
+  procedure storeWordOfObject*(fieldIndex: integer; objectPointer: OOP; withValue: integer) 
+  var obj : Object; off: integer
+  begin
+    obj := getSlot(objectPointer)
+    if obj = nil then return end
+    off := fieldIndex * 2
+    writeU16(obj, HeaderSize + off, withValue)
+  end storeWordOfObject
+  
+  procedure swapPointersOf*(firstPointer, secondPointer: OOP) 
+  var i1, i2: integer; tmp : Object
+  begin
+    i1 := bitshr(firstPointer, 1)
+    i2 := bitshr(secondPointer, 1)
+    tmp := slots[i1]
+    slots[i1] := slots[i2]
+    slots[i2] := tmp
+  end swapPointersOf
+  
+  procedure hasObject*(ptr: OOP): boolean 
+  var i: integer
+  begin
+    i := bitshr(ptr,1)
+    if i < len(slots) then
+      return slots[i] # nil
+    else
+      return false
+    end
+  end hasObject
+  
+  procedure methodClassOf*(methodPointer: OOP): OOP 
+  var literalCount: integer; association: OOP
+  begin
+    literalCount := literalCountOf(methodPointer)
+    association := literalOfMethod(literalCount-1, methodPointer)
+    return fetchPointerOfObject(ValueIndex,association)
+  end methodClassOf
+  
+  procedure headerOf(methodPointer: OOP): OOP
+  begin
+        return fetchPointerOfObject(0,methodPointer) // HeaderIndex
+  end headerOf
+
+  procedure literalCountOf(methodPointer: OOP):integer
+  var header: OOP
+  begin
+    header := headerOf(methodPointer)
+    return extractBits(9,14,header);
+  end literalCountOf
+  
+  procedure extractBits*( from, to_, of_: integer ): integer
+  begin
+    assert( (from <= to_) and (to_ <= 15) )
+    return bitand( bitshr(of_,(15 - to_)), ( bitshl(1, (to_ - from + 1)) - 1))
+  end extractBits
+  
+  procedure flagValueOf*(methodPointer: OOP): integer // returns compiled method flags 
+  var obj: Object
+  begin
+    assert(methodPointer # 0)
+    obj := getSlot(methodPointer)
+    if obj = nil then return 0 end    
+    assert( getClass(obj) = classCompiledMethod )
+    return getMethodFlags( obj[HeaderSize] )
+  end flagValueOf
+  
+  procedure getMethodFlags(data: integer ): integer inline
+  begin
+    return bitand(bitshr( data, 5 ), 07h)
+  end getMethodFlags
+  
+  procedure largeContextFlagOf*(methodPointer: OOP): boolean 
+  var header: OOP
+  begin
+    assert(methodPointer # 0)
+    header := headerOf(methodPointer)
+    return extractBits(8,8,header) # 0
+  end largeContextFlagOf
+  
+  procedure primitiveIndexOf*(methodPointer: OOP): integer 
+  var obj: Object; flags, literalByteCount, extension: integer
+  begin
+    obj := getSlot(methodPointer)
+    if obj = nil then return 0 end    
+    assert( getClass(obj) = classCompiledMethod )
+    flags := getMethodFlags( obj[HeaderSize] )
+    if flags # HeaderExtension then return 0 end
+    literalByteCount := getLiteralByteCount(obj)
+    extension := readU16(obj, HeaderSize + methHdrByteLen
+                              + literalByteCount - 4 ); // next to the last literal
+    return bitand(bitshr(extension, 1), 0ffh)
+  end primitiveIndexOf
+  
+  procedure getLiteralByteCount( obj: Object ): integer inline
+  begin
+    return 2 * bitand(bitshr(obj[HeaderSize+1], 1), 03h)
+  end getLiteralByteCount
+  
+  procedure literalOfMethod*(index: integer; methodPointer: OOP): OOP 
+  var obj: Object; literalByteCount, byteIndex: integer
+  begin
+    obj := getSlot(methodPointer)
+    if obj = nil then return 0 end    
+    assert( getClass(obj) = classCompiledMethod )
+    literalByteCount := getLiteralByteCount(obj)
+    byteIndex := 2 * index
+    return readU16( obj, HeaderSize + methHdrByteLen + byteIndex )
+  end literalOfMethod
+  
+  procedure initialInstructionPointerOfMethod*(methodPointer: OOP): integer inline
+  begin
+    return ( literalCountOf(methodPointer) + ValueIndex ) * 2 + 1
+  end initialInstructionPointerOfMethod
+  
+  procedure temporaryCountOf*(methodPointer: OOP): integer 
+  var header: OOP
+  begin
+    header := headerOf(methodPointer)
+    return extractBits(3,7,header)
+  end temporaryCountOf
+  
+  procedure fieldIndexOf*(methodPointer: OOP): integer inline
+  begin
+    return temporaryCountOf(methodPointer)
+  end fieldIndexOf
+  
+  procedure objectPointerCountOf*(methodPointer: OOP): integer inline
+  begin
+    return literalCountOf(methodPointer) + 1
+  end objectPointerCountOf
+  
+  procedure argumentCountOf(methodPointer: OOP): integer 
+  var obj: Object; flags, literalByteCount, extension: integer
+  begin
+    obj := getSlot(methodPointer)
+    if obj = nil then return 0 end    
+    assert( getClass(obj) = classCompiledMethod )
+    flags := getMethodFlags(obj[HeaderSize])
+    if flags <= FourArguments then
+      return flags
+    elsif (flags = ZeroArgPrimitiveReturnSelf) or (flags = ZeroArgPrimitiveReturnVar) then
+      return 0
+    end
+    assert( flags = HeaderExtension )
+    literalByteCount := getLiteralByteCount(obj)
+    extension := readU16( obj, HeaderSize + methHdrByteLen
+                                       + literalByteCount - 4 ) // next to the last literal
+    return bitand(bitshr(extension, 9), 01fh)
+  end argumentCountOf
+ 
+  procedure integerObjectOf*(value: integer): OOP 
+  var res: OOP
+  begin
+    res := 0
+    if value >= 0 then
+      res := bitor(bitshl( value, 1 ), 1)
+    else
+      res := bitnot( abs(value) + 1 )
+      res := bitor(bitshl( res, 1 ), 1)
+    end
+    return res
+  end integerObjectOf
+   
+  procedure integerValueOf*(objectPointer: OOP): integer 
+  var tcomp, res: integer
+  begin
+    if isInt(objectPointer) then
+      tcomp := bitshr( objectPointer, 1 )
+      if bitand(tcomp, 04000h) # 0 then
+        res := -( bitand(bitnot(tcomp), 07fffh ) - 1)
+        return res
+      else
+        return tcomp
+      end
+    end
+    // else
+    return 0
+  end integerValueOf
+  
+  procedure isIntegerObject*(objectPointer: OOP): boolean inline
+  begin
+    return isInt(objectPointer)
+  end isIntegerObject
+  
+  procedure isIntegerValue*(valueWord: integer): boolean
+  begin
+    // BB description: Return true if value can be represented as an instance of SmallInteger, false if not
+    // BB states "valueWord <= -16384 && valueWord > 16834;" which contradicts with the description
+    // Note the additional typo error in "16834" which should state "16384"!
+    return (valueWord >= -16384) and (valueWord <= 16383)
+  end isIntegerValue
+  
+  procedure getByteLen(obj: ByteArray): integer
+  var res: integer
+  begin
+    res := len(obj) - HeaderSize
+    if obj[OddFlag] # 0 then res := res - 1 end
+    return res
+  end getByteLen
+  
+  procedure fetchByteString*(objectPointer: OOP): ByteArray 
+  var obj : Object; res: ByteArray; s, i: integer
+  begin
+    if isInt(objectPointer) then return nil end
+    obj := getSlot(objectPointer)
+    if obj = nil then return nil end
+    s := getByteLen(obj)
+    new(res, s)
+    for i := 0 to s-1 do
+      res[i] := obj[i-HeaderSize]
+    end
+    return res
+  end fetchByteString
+  
+  procedure storeFloat(objectPointer: OOP; v: real) 
+  var i: integer
+  begin
+    assert( fetchByteLenghtOf(objectPointer) = 4 )
+    i := realToInt(v)
+    storeWordOfObject(0,objectPointer,bitand(bitshr(i, 16), 0ffffh))
+    storeWordOfObject(1,objectPointer, bitand(i, 0ffffh))
+  end storeFloat
+  
+  procedure fetchFloat(objectPointer: OOP): real 
+  var i: integer
+  begin
+    assert( fetchByteLenghtOf(objectPointer) = 4 )
+    i := bitor(
+          bitshl(fetchWordOfObject(0,objectPointer), 16),
+          fetchWordOfObject(1,objectPointer)
+         )
+    return intToReal(i)
+  end fetchFloat
+    
+  procedure getRegister*(index: integer): integer 
+  begin
+    return registers[index]
+  end getRegister
+  
+  procedure setRegister*(index, value: integer) 
+  begin
+    registers[index] := value
+  end setRegister
+  
+  procedure addTemp*(oop: OOP) 
+  begin
+    temps[oop] := true
+  end addTemp
+  
+  procedure removeTemp*(oop: OOP) 
+  begin
+    temps[oop] := false
+  end removeTemp
+
+  procedure instantiateClassWithPointers*(classPointer: OOP; instanceSize: integer): OOP inline
+  begin
+    return instantiateClass( classPointer, bitshl(instanceSize, 1), true )
+  end instantiateClassWithPointers
+  
+  procedure instantiateClass(cls: OOP; byteLen: integer; isPtr: boolean): OOP
+  var slot: integer; isOdd: boolean
+  begin
+    slot := findFreeSlot()
+    if slot < 0 then
+        collectGarbage()
+        slot := findFreeSlot()
+    end
+    if slot < 0 then
+        println("ERROR: cannot allocate object, no free object table slots")
+        assert(false)
+    end
+    isOdd := bitand(byteLen, 1) # 0
+    if isOdd then inc(byteLen) end
+    if allocate( slot, byteLen, cls, isPtr, isOdd ) = nil then
+        println("ERROR: cannot allocate object, no free memory")
+        assert(false)
+    end
+    return bitshl(slot, 1)
+  end instantiateClass
+  
+  procedure findFreeSlot(): integer
+  var i: integer
+  begin
+    for i := 0 to len(slots)-1 do
+      if slots[i] = nil then return i end
+    end
+    return -1
+  end findFreeSlot
+  
+  procedure collectGarbage()
+  begin // TODO
+    assert(false)
+  end collectGarbage
+  
+  procedure instantiateClassWithWords*(classPointer: OOP; instanceSize: integer): OOP 
+  begin
+    return instantiateClass( classPointer, bitshl(instanceSize, 1), false )
+  end instantiateClassWithWords
+  
+  procedure instantiateClassWithBytes*(classPointer: OOP; instanceByteSize: integer): OOP 
+  begin
+    return instantiateClass( classPointer, instanceByteSize, false )
+  end instantiateClassWithBytes
+  
+  procedure getNextInstance*(cls, cur: OOP): OOP 
+  var start, i: integer
+  begin
+    start := 0
+    if cur # 0 then
+      start := bitshr( cur, 1 ) + 1
+    end
+    for i := start to len(slots)-1 do
+      if (slots[i] # nil) and (getClass(slots[i]) = cls)  then
+        return bitshl(i, 1)
+      end
+    end
+    return 0
+  end getNextInstance
+  
+  procedure prettyValue*(oop: OOP): string 
+  var cls: OOP
+  begin
+    case oop of
+    | objectNil:
+        return "nil"
+    | objectFalse:
+        return "false"
+    | objectTrue:
+        return "true"
+    | processor:
+        return "processor"
+    | smalltalk:
+        return "smalltalk"
+    | symbolTable:
+        return "symbolTable"
+    | symbolDoesNotUnderstand:
+        return "symbolDoesNotUnderstand"
+    | symbolCannotReturn:
+        return "symbolCannotReturn"
+    | symbolMonitor:
+        return "symbolMonitor"
+    | symbolUnusedOop18:
+        return "symbolUnusedOop18"
+    | symbolMustBeBoolean:
+        return "symbolMustBeBoolean"
+    | specialSelectors:
+        return "specialSelectors"
+    | characterTable:
+        return "characterTable"
+    | 0:
+        return "<invalid oop>"
+    end
+    cls := fetchClassOf(oop)
+    case cls of
+    | classSmallInteger:
+        return tostring( integerValueOf(oop) )
+    | classLargePositiveInteger:
+        return tostring( largeIntegerValueOf(oop) ) + "L"
+    | classLargeNegativeInteger:
+        return tostring( -largeIntegerValueOf(oop) ) + "L"
+    | classString:
+        return '"' + tostring(fetchByteString(oop)) + '"'
+    | classFloat:
+        return tostring( fetchFloat(oop) )
+    | classPoint:
+        return prettyValue(fetchPointerOfObject( 0, oop )) + "@" + 
+              prettyValue(fetchPointerOfObject( 1, oop ))
+    | classCharacter:
+        return tostring(fetchWordOfObject(0,oop))
+    | classSymbol:
+        return "#" + tostring(fetchByteString(oop))
+    | classAssociation:
+        return prettyValue( fetchPointerOfObject( 0, oop ) ) + " = " +
+                    prettyValue( fetchPointerOfObject( 1, oop ) )
+    | 0:
+        return "<instance" + tostring(oop) + "with invalid class oop>"
+    end
+    return "<a " + tostring(fetchByteString(cls)) + ">"
+  end prettyValue
+  
+  procedure largeIntegerValueOf(integerPointer: OOP): integer
+  var value, length: integer
+  begin
+    if isIntegerObject(integerPointer) then
+      return integerValueOf(integerPointer)
+    end
+    value := 0
+    length := fetchByteLenghtOf(integerPointer)
+    if length = 2 then
+        value := bitshl(fetchByteOfObject(1, integerPointer), 8)
+        value := value + fetchByteOfObject(0, integerPointer)
+    elsif length = 3 then
+        // empirically found from examples
+        value := fetchByteOfObject(0, integerPointer)
+        value := value + bitshl(fetchByteOfObject(1, integerPointer), 8)
+        value := value + fetchByteOfObject(2, integerPointer) * 65536
+    elsif length = 4 then
+        // happens in Delay preSnapshot postSnapshot millisecondClockValue
+        // see Time millisecondClockInto and primitive99 for format description
+        // Milliseconds 1.1.1901 to 9.6.2020: 3'769'154'954
+        // e.g. ac9fbf66 = 1723834284L 1'723'834'284
+        value := fetchByteOfObject(0, integerPointer) +
+                bitshl( fetchByteOfObject(1, integerPointer), 8 ) +
+                bitshl( fetchByteOfObject(2, integerPointer), 16 ) +
+                bitshl( fetchByteOfObject(3, integerPointer), 24 )
+    elsif length = 1 then
+        value := fetchByteOfObject(0,integerPointer)
+    elsif length = 0 then
+        value := 0 // this obviously can happen
+    else
+        print("WARNING: large integer with ")
+        print(length)
+        println(" bytes not supported")
+        assert( false )
+        value := 0ffffffffh
+    end
+    return value
+  end largeIntegerValueOf
+  
+  procedure getWordLen*(ba: ByteArray): integer
+  begin
+    return (len(ba) + 1) div 2
+  end getWordLen
+
+  procedure realToInt(x: real): integer extern
+  procedure intToReal(x: integer): real extern
+
+begin
+  new(slots, bitshr(0ffffh, 1))
+  new(registers)
+  new(temps)
+  loadFromFile("/home/me/Entwicklung/Modules/Smalltalk/original_image/VirtualImage") // TEST
+end ObjectMemory
