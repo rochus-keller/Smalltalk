@@ -24,12 +24,12 @@ local C = ffi.C
 ffi.cdef[[
 	typedef uint8_t CharArray[?];
 	
-	int PAL2_init(uint8_t* b, int l, int w, int h);
+	int PAL2_init(uint8_t* b, int w, int h);
 	int PAL2_deinit();
 	int PAL2_processEvents(int sleep);
 	int PAL2_nextEvent();
 	int PAL2_getTime();
-	int PAL2_setCursorBitmap(uint8_t* b, int l, int w, int h);
+	int PAL2_setCursorBitmap(uint8_t* b, int w, int h);
 	void PAL2_setCursorPos(int x, int y);
 ]]
 
@@ -39,14 +39,14 @@ function Display_getTicks()
 	return C.PAL2_getTime() * 1000
 end
 
--- Bitmap = record pixWidth, pixHeight, pixLineWidth, wordLen: integer; buffer: array of byte end
+-- Bitmap = record pixWidth(0), pixHeight(1): integer; buffer(2): array of byte end
 function Display_setScreenBitmap(bm)
 	bitmap = bm
-	C.PAL2_init(bm[4], bm[2] * 2, bm[0], bm[1])
+	C.PAL2_init(bm[2], bm[0], bm[1])
 end
 
 function Display_setCursorBitmap(bm)
-	C.PAL2_setCursorBitmap(bm[4], bm[2] * 2, bm[0], bm[1])
+	C.PAL2_setCursorBitmap(bm[2], bm[0], bm[1])
 end
 
 function Display_setCursorPos(x, y)
@@ -58,7 +58,7 @@ function Display_getScreenBitmap()
 end
 
 function Display_processEvents()
-	C.PAL2_processEvents(20)
+	-- TODO C.PAL2_processEvents(30)
 end
 
 function Display_nextEvent()

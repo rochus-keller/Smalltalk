@@ -21,7 +21,7 @@
 
 module Interpreter
 
-import OM := ObjectMemory, D := Display, DT := DateTime, I := Input, B := BitBlt
+import OM := ObjectMemory, D := Display, DT := DateTime, I := Input, B := BitBlt, F := Files
 
 type    OOP = OM.OOP
 
@@ -66,17 +66,19 @@ var    newProcessWaiting : boolean
        semaphoreIndex: integer
        toSignal: OOP
        waitUntil : integer
+       log: F.File
 
   procedure interpret*()
+  const display = 0340h
   var ticks: integer
   begin
     println("Started Smalltalk interpreter")
-    trap
     D.run := true
+    D.setScreenBitmap(fetchBitmap(display)) // TODO: we assume that display is known
     cycleNr := 0
     level := 0
     newActiveContext( firstContext() )
-    while D.run do
+    while D.run and (cycleNr < 121000) do 
       cycle()
       D.processEvents()
       if waitUntil # 0 then
@@ -390,13 +392,15 @@ var    newProcessWaiting : boolean
   begin 
     variable := OM.extractBits( 12, 15, currentBytecode )
     value := temporary( variable )
-    TRACE_BYTECODE("variable: " + tostring(variable) + " value:" + OM.prettyValue(variable))
+    TRACE_BYTECODE("variable: " + tostring(variable) + " value: " + OM.prettyValue(value))
     push( value )
   end pushTemporaryVariableBytecode
   
   procedure temporary(offset: integer): OOP
+  var ctx: OOP
   begin
-    OM.fetchPointerOfObject( offset + TempFrameStart, OM.getRegister(HomeContext) )
+    ctx := OM.getRegister(HomeContext)
+    return OM.fetchPointerOfObject( offset + TempFrameStart, ctx )
   end temporary
   
   procedure pushLiteralConstantBytecode()
@@ -699,7 +703,6 @@ var    newProcessWaiting : boolean
     OM.setRegister(MessageSelector, OM.symbolDoesNotUnderstand )
     print("ERROR: class ")print(OM.prettyValue(cls))
     print(" doesNotUnderstand ")println(OM.prettyValue( selector ))
-    assert(false)
     return false
   end lookupMethodInClass
   
@@ -1232,7 +1235,7 @@ var    newProcessWaiting : boolean
         if isPointers(cls) then
             return OM.fetchPointerOfObject(index-1,arr)
         else
-            value := OM.fetchWordOfObject(index-1,arr)
+            value := OM.fromTwoComp(OM.fetchWordOfObject(index-1,arr))
             return positive16BitIntegerFor(value)
         end
     else
@@ -1244,27 +1247,19 @@ var    newProcessWaiting : boolean
   procedure positive16BitIntegerFor(integerValue: integer): OOP
   var newLargeInteger: OOP
   begin
-    if OM.extractBits( 0, 1, integerValue ) = 0 then // BB error, fixed like VIM
+    assert( integerValue >= 0 )
+
+    if OM.isIntegerValue(integerValue) then
       return OM.integerObjectOf(integerValue)
     end
 
     newLargeInteger := OM.instantiateClassWithBytes(OM.classLargePositiveInteger, 2)
 
-    OM.storeByteOfObject( 0, newLargeInteger, lowByteOf( integerValue ) )
-    OM.storeByteOfObject( 1, newLargeInteger, highByteOf( integerValue ) )
+    OM.storeByteOfObject( 0, newLargeInteger, clip(integerValue) )
+    OM.storeByteOfObject( 1, newLargeInteger, clip(bitshr(integerValue, 8)) )
     return newLargeInteger
   end positive16BitIntegerFor
-  
-  procedure lowByteOf( anInteger: integer ): byte
-  begin
-    return clip(OM.extractBits( 8, 15, anInteger ))
-  end lowByteOf
-  
-  procedure highByteOf( anInteger: integer ): byte
-  begin
-    return clip(OM.extractBits( 0, 7, anInteger ))
-  end highByteOf
-  
+      
   procedure isPointers(classPointer: OOP): boolean
   begin
     return bitand(instanceSpecificationOf(classPointer), 08000h) # 0
@@ -1306,7 +1301,7 @@ var    newProcessWaiting : boolean
   var value: integer
   begin
     if OM.isIntegerObject(integerPointer) then
-      return OM.integerValueOf(integerPointer)
+      return abs(OM.integerValueOf(integerPointer))
     end
 
     if OM.fetchClassOf(integerPointer) # OM.classLargePositiveInteger then
@@ -1317,8 +1312,8 @@ var    newProcessWaiting : boolean
       return primitiveFail()
     end
 
-    value := OM.fetchByteOfObject(1, integerPointer)
-    value := value * 256 + OM.fetchByteOfObject(0, integerPointer)
+    value := bitshl(OM.fetchByteOfObject(1, integerPointer), 8)
+    value := OM.fetchByteOfObject(0, integerPointer)
     return value
   end positive16BitValueOf
   
@@ -1346,6 +1341,7 @@ var    newProcessWaiting : boolean
   begin
     cls := OM.fetchClassOf(arr)
     if isWords(cls) then
+      // all elements are 16 bit values
       if isPointers(cls) then
         OM.storePointerOfObject(index-1, arr, value )
       else
@@ -1356,9 +1352,11 @@ var    newProcessWaiting : boolean
         end
       end
     else
+      // all elements are 8 bit values
       successUpdate( OM.isIntegerObject(value) )
       if success then
-        OM.storeByteOfObject(index-1, arr, lowByteOf( OM.integerValueOf(value) ) )
+        OM.storeByteOfObject(index-1, arr, 
+              clip(bitand( OM.integerValueOf(value), 0ffh )) )
       end
     end
   end subscriptWithStoring
@@ -2140,7 +2138,7 @@ var    newProcessWaiting : boolean
     height := OM.integerValueOf(OM.fetchPointerOfObject(2,form))
     bs := OM.fetchByteString(bitmap)
     assert( bs # nil )
-    return D.createBitmap( bs, OM.getWordLen(bs), width, height )
+    return D.createBitmap( bs, width, height )
   end fetchBitmap
   
   procedure primitiveBeDisplay() 
@@ -2356,27 +2354,33 @@ var    newProcessWaiting : boolean
   end successUpdate
 
 	procedure primitiveAdd()
-	var integerArgument, integerReceiver: integer
+	var integerArgument, integerReceiver, integerResult: integer
 	begin 
-  	TRACE_PRIMITIVE("")
     integerArgument := popInteger()
-    if not success then unPop(2) return end
     integerReceiver := popInteger()
-    if not success then unPop(2) return end
-    pushInteger( integerReceiver + integerArgument )
-    // NOTE: original isIntegerValue(result)
+    integerResult := 0
+    if success then
+      integerResult := integerReceiver + integerArgument
+      successUpdate( OM.isIntegerValue(integerResult) )
+    end
+    if success then
+        pushInteger( integerResult )
+    else unPop(2) end
 	end primitiveAdd
 
 	procedure primitiveSubtract()
-	var integerArgument, integerReceiver: integer
+	var integerArgument, integerReceiver, integerResult: integer
 	begin 
-  	TRACE_PRIMITIVE("")
     integerArgument := popInteger()
-    if not success then unPop(2) return end
     integerReceiver := popInteger()
-    if not success then unPop(2) return end
-    pushInteger( integerReceiver - integerArgument )
-    // NOTE: original isIntegerValue(result)
+    integerResult := 0
+    if success then
+      integerResult := integerReceiver - integerArgument
+      successUpdate( OM.isIntegerValue(integerResult) )
+    end
+    if success then
+        pushInteger( integerResult )
+    else unPop(2) end
 	end primitiveSubtract
 
 	procedure primitiveLessThan()
@@ -2452,15 +2456,18 @@ var    newProcessWaiting : boolean
 	end primitiveNotEqual
 
 	procedure primitiveMultiply()
-	var integerArgument, integerReceiver: integer
+	var integerArgument, integerReceiver, integerResult: integer
 	begin 
-  	TRACE_PRIMITIVE("")
     integerArgument := popInteger()
-    if not success then unPop(2) return end
     integerReceiver := popInteger()
-    if not success then unPop(2) return end
-    pushInteger( integerReceiver * integerArgument ) 
-    // NOTE: original isIntegerValue(result)
+    integerResult := 0
+    if success then
+      integerResult := integerReceiver * integerArgument
+      successUpdate( OM.isIntegerValue(integerResult) )
+    end
+    if success then
+        pushInteger( integerResult )
+    else unPop(2) end
 	end primitiveMultiply
 
 	procedure primitiveDivide()
@@ -2531,17 +2538,17 @@ var    newProcessWaiting : boolean
 	end primitiveBitShift
 
   procedure bitShift(wordToShift, offset: integer): integer
-  var tmp, tmp2: integer
+  var uint: integer
   begin
-    if offset >= 0 then return bitshl(wordToShift, offset) end
-    offset := -offset
-    if wordToShift < 0 then
-      tmp := wordToShift
-      tmp2 := -bitshr( bitand(wordToShift, bitshl(1, 15)), offset)
-      return bitor(bitshr(tmp, offset), tmp2)
+    uint := OM.toTwoComp(wordToShift)
+    if offset >= 0 then 
+      // shift left
+      uint := bitand(bitshl(uint, offset), 0011_1111_1111_1111b)
     else
-      return bitshr(wordToShift, offset)
+      offset := -offset
+      uint := bitshr(uint, offset)
     end
+    return OM.fromTwoComp(uint)
   end bitShift
   
 	procedure primitiveDiv()
@@ -2643,7 +2650,7 @@ var    newProcessWaiting : boolean
     return OM.fetchPointerOfObject( stackPointer - offset, OM.getRegister(ActiveContext) )
   end stackValue
   
-  procedure literal(offset: integer): integer
+  procedure literal(offset: integer): OOP
   begin
     return OM.literalOfMethod( offset, OM.getRegister(Method) )
   end literal
@@ -2729,14 +2736,20 @@ var    newProcessWaiting : boolean
   
   procedure TRACE_BYTECODE(str: string)
   begin
-    print("Bytecode <")print(currentBytecode)print("> ")println(str)
+    F.WriteString(log,"Bytecode <")
+    F.WriteString(log,tostring(currentBytecode))
+    F.WriteString(log,">" + 9x + " ")
+    F.WriteString(log,str)
+    F.WriteString(log, ""+0ax)
   end TRACE_BYTECODE
   
   procedure TRACE_PRIMITIVE(str: string)
   begin
-    print("Primitive #")print(primitiveIndex)print(" ")println(str)
+    //print("Primitive #")print(primitiveIndex)print(" ")println(str)
   end TRACE_PRIMITIVE
   
 begin
   new(semaphoreList) semaphoreIndex := -1
+  log := F.Open("/home/me/Entwicklung/Modules/Smalltalk/original_image/Versteck/CorrelateLogs/luon.log")
+  if log = nil then println(F.LastError()) end
 end Interpreter

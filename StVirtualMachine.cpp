@@ -64,6 +64,15 @@ int main(int argc, char *argv[])
 
     VirtualMachine w;
 
+    for( int i = 1; i < a.arguments().size(); i++ )
+    {
+        if( a.arguments()[i] == "-log" )
+        {
+            Display::inst()->setLog(true);
+            break;
+        }
+    }
+
     if( a.arguments().size() > 1 )
         w.run( a.arguments()[1] );
     else

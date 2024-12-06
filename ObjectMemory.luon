@@ -97,6 +97,7 @@ var
       slots : array of Object
       registers : array 10 of integer
       temps : hashmap OOP of boolean
+      test: boolean
 
   procedure loadFromFile*(path: string):boolean
   var f: Files.File; bytes, objectSpace, objectTable: ByteArray
@@ -222,8 +223,6 @@ var
     ptr[OddFlag] := clip(ord(isOdd))
     ptr[PtrFlag] := clip(ord(isPtr))
     cls := bitshr(cls, 1)
-    //ptr[ClsMsb] := clip(bitshr(cls,8))
-    //ptr[ClsLsb] := clip(bitand(cls,0ffh))
     writeU16(ptr, ClsMsb, cls)
     slots[slot] := ptr
     return ptr
@@ -262,11 +261,14 @@ var
   end getSlot
   
   procedure fetchClassOf*(objectPointer: OOP): OOP
-  var obj : Object
+  var obj : Object; cls: OOP
   begin
     if isInt(objectPointer) then return classSmallInteger end
     obj := getSlot(objectPointer)
-    if obj # nil then return bitshl(readU16(obj,0),1) else return 0 end
+    if obj # nil then 
+      cls := readU16(obj,ClsMsb)
+      return bitshl(cls,1) 
+    else return 0 end
   end fetchClassOf
   
   procedure fetchWordLenghtOf*(objectPointer: OOP): integer 
@@ -436,8 +438,9 @@ var
   end primitiveIndexOf
   
   procedure getLiteralByteCount( obj: Object ): integer inline
+
   begin
-    return 2 * bitand(bitshr(obj[HeaderSize+1], 1), 03h)
+    return 2 * bitand(bitshr(obj[HeaderSize+1], 1), 03fh)
   end getLiteralByteCount
   
   procedure literalOfMethod*(index: integer; methodPointer: OOP): OOP 
@@ -495,27 +498,44 @@ var
   procedure integerObjectOf*(value: integer): OOP 
   var res: OOP
   begin
-    res := 0
-    if value >= 0 then
-      res := bitor(bitshl( value, 1 ), 1)
-    else
-      res := bitnot( abs(value) + 1 )
-      res := bitor(bitshl( res, 1 ), 1)
-    end
+    res := toTwoComp(value)
+    res := bitor(bitshl( res, 1 ), 1)
     return res
   end integerObjectOf
+  
+  procedure toTwoComp*(value: integer): integer
+  var res: integer
+  begin
+    // ST integers have 15 bit range
+    if value >= 0 then
+      res := bitand(value, 0011_1111_1111_1111b)
+    else
+      res := bitnot(abs(value)) + 1
+      res := bitand(res, 0111_1111_1111_1111b)
+      res := bitor(res, 0100_0000_0000_0000b)
+    end
+    return res
+  end toTwoComp
+  
+  procedure fromTwoComp*(value: integer): integer
+  var negative: boolean; res: integer
+  begin
+    negative := bitand(value, 0100_0000_0000_0000b) # 0
+    if negative then 
+      res := -bitand( bitnot(value), 0111_1111_1111_1111b ) - 1
+    else
+      res := bitand(value, 0011_1111_1111_1111b)
+    end
+    return res;
+  end fromTwoComp
    
   procedure integerValueOf*(objectPointer: OOP): integer 
-  var tcomp, res: integer
+  var res: integer
   begin
     if isInt(objectPointer) then
-      tcomp := bitshr( objectPointer, 1 )
-      if bitand(tcomp, 04000h) # 0 then
-        res := -( bitand(bitnot(tcomp), 07fffh ) - 1)
-        return res
-      else
-        return tcomp
-      end
+      res := bitshr(objectPointer, 1)
+      res := fromTwoComp(res)
+      return res;
     end
     // else
     return 0
@@ -551,10 +571,31 @@ var
     s := getByteLen(obj)
     new(res, s)
     for i := 0 to s-1 do
-      res[i] := obj[i-HeaderSize]
+      res[i] := obj[i+HeaderSize]
     end
     return res
   end fetchByteString
+  
+  procedure fetchString*(objectPointer: OOP):string
+  var obj : Object; ba: ByteArray; s, i: integer; c: byte
+  begin
+    if isInt(objectPointer) then 
+      return tostring(integerValueOf(objectPointer))
+    end
+    obj := getSlot(objectPointer)
+    if obj = nil then return "nil" end
+    s := getByteLen(obj) + 1
+    new(ba, s)
+    for i := 0 to s-2 do
+      c := obj[i+HeaderSize]
+      if c = 0h then ba[i] := 20h
+      elsif (c <= 01fh) or (c >= 07fh) then ba[i] := 03fh // "?" 
+      else ba[i] := c
+      end
+    end
+    ba[len(ba)-1] := 0h
+    return tostring(ba)
+  end fetchString
   
   procedure storeFloat(objectPointer: OOP; v: real) 
   var i: integer
@@ -625,7 +666,7 @@ var
   procedure findFreeSlot(): integer
   var i: integer
   begin
-    for i := 0 to len(slots)-1 do
+    for i := 1 to len(slots)-1 do
       if slots[i] = nil then return i end
     end
     return -1
@@ -699,11 +740,13 @@ var
     | classSmallInteger:
         return tostring( integerValueOf(oop) )
     | classLargePositiveInteger:
-        return tostring( largeIntegerValueOf(oop) ) + "L"
+        return "oop(" + tostring(oop) + ") " + 
+                tostring( largeIntegerValueOf(oop) ) + "L"
     | classLargeNegativeInteger:
-        return tostring( -largeIntegerValueOf(oop) ) + "L"
+        return "oop(" + tostring(oop) + ") " +
+                tostring( -largeIntegerValueOf(oop) ) + "L"
     | classString:
-        return '"' + tostring(fetchByteString(oop)) + '"'
+        return '"' + fetchString(oop) + '"'
     | classFloat:
         return tostring( fetchFloat(oop) )
     | classPoint:
@@ -712,33 +755,40 @@ var
     | classCharacter:
         return tostring(fetchWordOfObject(0,oop))
     | classSymbol:
-        return "#" + tostring(fetchByteString(oop))
+        return "#" + fetchString(oop)
     | classAssociation:
         return prettyValue( fetchPointerOfObject( 0, oop ) ) + " = " +
                     prettyValue( fetchPointerOfObject( 1, oop ) )
     | 0:
-        return "<instance" + tostring(oop) + "with invalid class oop>"
+        return "<instance " + tostring(oop) + " with invalid class oop>"
     end
-    return "<a " + tostring(fetchByteString(cls)) + ">"
+    return "oop(" + tostring(oop) + ") cls(" + tostring(cls) + ")"
   end prettyValue
   
   procedure largeIntegerValueOf(integerPointer: OOP): integer
-  var value, length: integer
+  var value, length: integer; cls: OOP
   begin
     if isIntegerObject(integerPointer) then
       return integerValueOf(integerPointer)
     end
     value := 0
+    // only large positive and negative integers arrive here
     length := fetchByteLenghtOf(integerPointer)
-    if length = 2 then
-        value := bitshl(fetchByteOfObject(1, integerPointer), 8)
-        value := value + fetchByteOfObject(0, integerPointer)
-    elsif length = 3 then
+    // TRAPIF(test)
+    case length of
+    | 0:
+        value := 0 // this obviously can happen
+    | 1:
+        value := fetchByteOfObject(0,integerPointer)
+    | 2:
+        value := fetchByteOfObject(0, integerPointer)
+        value := value + bitshl(fetchByteOfObject(1, integerPointer), 8)
+    | 3: 
         // empirically found from examples
         value := fetchByteOfObject(0, integerPointer)
         value := value + bitshl(fetchByteOfObject(1, integerPointer), 8)
-        value := value + fetchByteOfObject(2, integerPointer) * 65536
-    elsif length = 4 then
+        value := value + bitshl(fetchByteOfObject(2, integerPointer), 16)
+    | 4:
         // happens in Delay preSnapshot postSnapshot millisecondClockValue
         // see Time millisecondClockInto and primitive99 for format description
         // Milliseconds 1.1.1901 to 9.6.2020: 3'769'154'954
@@ -747,25 +797,15 @@ var
                 bitshl( fetchByteOfObject(1, integerPointer), 8 ) +
                 bitshl( fetchByteOfObject(2, integerPointer), 16 ) +
                 bitshl( fetchByteOfObject(3, integerPointer), 24 )
-    elsif length = 1 then
-        value := fetchByteOfObject(0,integerPointer)
-    elsif length = 0 then
-        value := 0 // this obviously can happen
     else
         print("WARNING: large integer with ")
         print(length)
         println(" bytes not supported")
-        assert( false )
         value := 0ffffffffh
     end
     return value
   end largeIntegerValueOf
   
-  procedure getWordLen*(ba: ByteArray): integer
-  begin
-    return (len(ba) + 1) div 2
-  end getWordLen
-
   procedure realToInt(x: real): integer extern
   procedure intToReal(x: integer): real extern
 
