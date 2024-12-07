@@ -62,7 +62,7 @@ private:
     {
     public:
         enum { PixPerByte = 8, PixPerWord = PixPerByte * 2 };
-        Bitmap():d_buf(0),d_wordLen(0) {}
+        Bitmap():d_buf(0),d_wordLen(0),d_pixWidth(0),d_pixHeight(0),d_pixLineWidth(0) {}
         Bitmap( quint8* buf, quint16 wordLen, quint16 pixWidth, quint16 pixHeight );
         inline const quint8* scanLine(int y) const
         {
@@ -131,6 +131,7 @@ private:
         void updateArea(const QRect& r);
         void setLog(bool on);
         void setEventCallback( EventCallback cb ) { d_eventCb = cb; }
+        const QImage& getScreen() const { return d_screen; }
         static void processEvents();
         static void copyToClipboard( const QByteArray& );
     signals:

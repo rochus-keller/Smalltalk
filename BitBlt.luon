@@ -105,6 +105,11 @@ const
     end
   end clipRange
   
+  procedure not16(x: integer): integer inline
+  begin
+    return bitand(bitnot(x), 0ffffh)
+  end not16
+  
   procedure computeMasks()
   var startBits, endBits: integer
   begin 
@@ -120,7 +125,7 @@ const
     startBits := 16 - bitand( dx, 15 )
     mask1 := RightMasks[ startBits (* + 1 *) ] // ST array index starts with 1
     endBits := 15 - bitand( ( dx + w - 1 ), 15 )
-    mask2 := bitnot(RightMasks[ endBits (* + 1 *) ])
+    mask2 := not16(RightMasks[ endBits (* + 1 *) ])
     if skew = 0 then skewMask := 0 else skewMask := RightMasks[ 16 - skew (* + 1 *) ] end
 
     if w < startBits then
@@ -148,7 +153,7 @@ const
             hDir := -1
             sx := sx + w - 1
             dx := dx + w - 1
-            skewMask := bitnot(skewMask)
+            skewMask := not16(skewMask)
             t := mask1
             mask1 := mask2
             mask2 := t
@@ -194,7 +199,7 @@ const
                 else
                     thisWord := 0
                 end
-                skewWord := bitor( prevWord, bitand( thisWord, bitnot(skewMask) ) )
+                skewWord := bitor( prevWord, bitand( thisWord, not16(skewMask) ) )
                 prevWord := thisWord
                 skewWord := bitor( bitshl( skewWord, skew ), bitshr( skewWord, -( skew - 16 ) ) )
             end
@@ -202,7 +207,7 @@ const
             destWord := D.wordAt(destBits, destIndex + 1 )
             mergeWord := merge( combinationRule, bitand(skewWord, halftoneWord), destWord )
             D.wordAtPut(destBits, destIndex + 1, 
-                bitor( bitand(mergeMask, mergeWord), bitand( bitnot(mergeMask), destWord ) ) )
+                bitor( bitand(mergeMask, mergeWord), bitand( not16(mergeMask), destWord ) ) )
             sourceIndex := sourceIndex + hDir
             destIndex := destIndex + hDir
             if word = ( nWords - 1 ) then
@@ -224,11 +229,11 @@ const
     | 1:
         return bitand(source, destination)
     | 2:
-        return bitand(source, bitnot(destination))
+        return bitand(source, not16(destination))
     | 3:
         return source
     | 4:
-        return bitand( bitnot(source), destination)
+        return bitand( not16(source), destination)
     | 5:
         return destination
     | 6:
@@ -236,19 +241,19 @@ const
     | 7:
         return bitor(source, destination)
     | 8:
-        return bitand( bitnot(source), bitnot(destination) )
+        return bitand( not16(source), not16(destination) )
     | 9:
-        return bitxor( bitnot(source), destination )
+        return bitxor( not16(source), destination )
     | 10:
-        return bitnot(destination)
+        return not16(destination)
     | 11:
-        return bitor(source, bitnot(destination))
+        return bitor(source, not16(destination))
     | 12:
-        return bitnot(source)
+        return not16(source)
     | 13:
-        return bitor( bitnot(source), destination)
+        return bitor( not16(source), destination)
     | 14:
-        return bitor( bitnot(source), bitnot(destination) )
+        return bitor( not16(source), not16(destination) )
     | 15:
         return AllOnes;
     else

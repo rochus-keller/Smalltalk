@@ -69,18 +69,35 @@ var    newProcessWaiting : boolean
        log: F.File
 
   procedure interpret*()
+  // NOTE: display oop is well known in the original ST-80v2 image (but not otherwise)
   const display = 0340h
-  var ticks: integer
+  var ticks: integer; sema: OOP
   begin
     println("Started Smalltalk interpreter")
     D.run := true
-    D.setScreenBitmap(fetchBitmap(display)) // TODO: we assume that display is known
+    D.setScreenBitmap(fetchBitmap(display)) 
     cycleNr := 0
     level := 0
     newActiveContext( firstContext() )
-    while D.run and (cycleNr < 121000) do 
+    while D.run and (cycleNr < 121000) do // TEST
+      // NOTE that this loop segfaults the LuaJIT JIT after ~200k cycles, if
+      // neither measure A nor B is present. As soon as either is uncommented,
+      // no segfault happens. Also if the JIT is disabled, no segfault happens!
+      // the exact number next to "mod" is not relevant.
+      // NOTE that the reason for this might have been a read out of bounds in mark
+      
+      //if cycleNr mod 1000000 = 0 then print("step ")println(cycleNr) end // (A
       cycle()
-      D.processEvents()
+      if (cycleNr mod 1000 = 0) and // (B
+          D.processEvents() then D.run := false end
+      if D.eventPending() then
+        sema := OM.getRegister(InputSemaphore)
+        if sema # 0 then 
+          asynchronousSignal(sema)
+        else
+          D.nextEvent()
+        end
+      end
       if waitUntil # 0 then
         ticks := D.getTicks()
         if waitUntil - ticks <= 0 then 
@@ -88,6 +105,7 @@ var    newProcessWaiting : boolean
         end
       end
     end
+    D.close()
     println("Finished Smalltalk interpreter")
   end interpret
 
@@ -1313,7 +1331,7 @@ var    newProcessWaiting : boolean
     end
 
     value := bitshl(OM.fetchByteOfObject(1, integerPointer), 8)
-    value := OM.fetchByteOfObject(0, integerPointer)
+    value := value + OM.fetchByteOfObject(0, integerPointer)
     return value
   end positive16BitValueOf
   
@@ -2031,6 +2049,7 @@ var    newProcessWaiting : boolean
     *)
     bitblt := stackTop()
 
+    // destBits: 22454 cursor, 26138 screen
     destBits := fetchBitmap(OM.fetchPointerOfObject(0,bitblt) )
     sourceBits := fetchBitmap(OM.fetchPointerOfObject(1,bitblt) )
     halftoneBits := fetchBitmap(OM.fetchPointerOfObject(2,bitblt) )
@@ -2053,11 +2072,13 @@ var    newProcessWaiting : boolean
     B.clipWidth := OM.integerValueOf( OM.fetchPointerOfObject(12,bitblt) )
     B.clipHeight := OM.integerValueOf( OM.fetchPointerOfObject(13,bitblt) )
 
+    // TRAPIF(cycleNr=13152)
     B.copyBits()
 
-    if drawToDisp then
-      D.updateArea( D.intersect({B.destX, B.destY, B.width, B.height}, 
-                                {B.clipX, B.clipY, B.clipWidth, B.clipHeight}) )
+    if true then // drawToDisp then
+      // drawToDisp only one time false at cycle 34837
+      D.updateArea( B.destX, B.destY, B.width, B.height, 
+                                B.clipX, B.clipY, B.clipWidth, B.clipHeight )
     end
   end primitiveCopyBits
   
@@ -2098,6 +2119,7 @@ var    newProcessWaiting : boolean
               bitshl(OM.fetchByteOfObject(2,oop), 16) +
               bitshl(OM.fetchByteOfObject(1,oop), 8) +
               OM.fetchByteOfObject(0,oop)
+    TRAP
     ticks := D.getTicks()
     if time - ticks > 0 then
       waitUntil := time
@@ -2168,7 +2190,7 @@ var    newProcessWaiting : boolean
     | 113:
         primitiveQuit()
     | 114:
-        println("WARNING: primitiveExitToDebugger not yet implemnted")
+        println("WARNING: primitiveExitToDebugger not implemnted")
     | 116:
         primitiveSignalAtOopsLeftWordsLeft()
     else
@@ -2217,10 +2239,7 @@ var    newProcessWaiting : boolean
     semaphore := popStack()
 
     // BB error: not documented, neither in VIM
-    print("WARNING: primitiveSignalAtOopsLeftWordsLeft not implemented ")
-    print(OM.prettyValue(number1)) print(" ")
-    print(OM.prettyValue(number2)) print(" ")
-    println(OM.prettyValue(semaphore))
+    println("WARNING: primitiveSignalAtOopsLeftWordsLeft not implemented ")
   end primitiveSignalAtOopsLeftWordsLeft
  
   procedure dispatchPrivatePrimitives() inline
@@ -2736,6 +2755,7 @@ var    newProcessWaiting : boolean
   
   procedure TRACE_BYTECODE(str: string)
   begin
+    if log = nil then return end
     F.WriteString(log,"Bytecode <")
     F.WriteString(log,tostring(currentBytecode))
     F.WriteString(log,">" + 9x + " ")
@@ -2750,6 +2770,6 @@ var    newProcessWaiting : boolean
   
 begin
   new(semaphoreList) semaphoreIndex := -1
-  log := F.Open("/home/me/Entwicklung/Modules/Smalltalk/original_image/Versteck/CorrelateLogs/luon.log")
-  if log = nil then println(F.LastError()) end
+  //log := F.Open("/home/me/Entwicklung/Modules/Smalltalk/original_image/Versteck/CorrelateLogs/luon.log")
+  //if log = nil then println(F.LastError()) end
 end Interpreter

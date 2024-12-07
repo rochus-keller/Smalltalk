@@ -30,21 +30,24 @@ type
               
 var run* : boolean
 
-  procedure processEvents*() extern
+  procedure processEvents*(): boolean extern
   procedure nextEvent(): integer extern
   procedure setCursorPos*(x,y: integer) extern
   procedure setCursorBitmap*(bm: Bitmap) extern 
   procedure setScreenBitmap*(bm: Bitmap) extern 
   procedure getScreenBitmap*(): Bitmap extern
-  procedure updateArea*(r: Rect) end // TODO
-  procedure intersect(a,b: Rect): Rect end // TODO
+  procedure updateArea*(x,y,w,h: integer; cx, cy, cw, ch: integer ) extern 
   procedure getTicks(): integer extern
+  procedure close() extern
+  procedure eventPending(): boolean extern
   
   procedure createBitmap*(bs: array of byte; pixWidth, pixHeight: integer): Bitmap
-  var bm: Bitmap
+  var bm: Bitmap; l: integer
   begin
     new(bm)
     bm.buffer := bs
+    l := len(bs)
+    assert( l >= pixWidth * pixHeight div 8 )
     bm.pixWidth := pixWidth
     bm.pixHeight := pixHeight
     return bm
@@ -53,12 +56,14 @@ var run* : boolean
   procedure wordAt*(bm: Bitmap; i: integer): integer
   begin
     dec(i) // Smalltalk array indexes start with 1
+    assert(i+1 < len(bm.buffer))
     return bitshl(bm.buffer[i], 8 ) + bm.buffer[i+1]
   end wordAt
   
   procedure wordAtPut*(bm: Bitmap; i, v: integer)
   begin
     dec(i)
+    assert(i+1 < len(bm.buffer))
     bm.buffer[i] := clip(bitand( bitshr( v, 8 ), 0ffh ))
     bm.buffer[i+1] := clip(bitand( v, 0ffh ))
   end wordAtPut

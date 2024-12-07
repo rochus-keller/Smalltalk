@@ -145,6 +145,7 @@ void Interpreter::interpret()
         if( Display::s_break )
             onBreak();
     }
+
     const quint32 endTime = Display::inst()->getTicks();
     qWarning() << "runtime [ms]:" << ( endTime - startTime );
 }
