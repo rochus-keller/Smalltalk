@@ -26,14 +26,11 @@ import D := Display
   // This is a textbook implementation according to Blue Book chapter 18 "Simulation of BitBlt".
   // Known to be inefficient; focus is on functionality and compliance.
 
-var
-  sourceBits*: D.Bitmap
-  destBits*: D.Bitmap
-  halftoneBits*: D.Bitmap
-  combinationRule*: integer
-  destX*, clipX*, clipWidth*, sourceX*, width*: integer
-  destY*, clipY*, clipHeight*, sourceY*, height*: integer
+type
+  Context* = D.Context
   
+var  
+  ctx: Context
   sourceRaster: integer
   destRaster: integer
   skew, nWords, vDir, hDir: integer
@@ -46,8 +43,9 @@ var
 const
   AllOnes = 0ffffh
   
-  procedure copyBits*()
+  procedure copyBits*(c: Context)
   begin 
+    ctx := c
     clipRange()
     if (w <= 0) or (h <= 0) then return end
     computeMasks()
@@ -60,48 +58,48 @@ const
   begin 
     // set sx/y, dx/y, w and h so that dest doesn't exceed clipping range and
     // source only covers what needed by clipped dest
-    if destX >= clipX  then
-        sx := sourceX
-        dx := destX
-        w := width
+    if ctx.destX >= ctx.clipX  then
+        sx := ctx.sourceX
+        dx := ctx.destX
+        w := ctx.width
     else
-        sx := sourceX + ( clipX - destX )
-        w := width - ( clipX - destX )
-        dx := clipX
+        sx := ctx.sourceX + ( ctx.clipX - ctx.destX )
+        w := ctx.width - ( ctx.clipX - ctx.destX )
+        dx := ctx.clipX
     end
-    if ( dx + w ) > ( clipX + clipWidth ) then
-        w := w - ( ( dx + w ) - ( clipX + clipWidth ) )
+    if ( dx + w ) > ( ctx.clipX + ctx.clipWidth ) then
+        w := w - ( ( dx + w ) - ( ctx.clipX + ctx.clipWidth ) )
     end
-    if destY >= clipY then
-        sy := sourceY
-        dy := destY
-        h := height
+    if ctx.destY >= ctx.clipY then
+        sy := ctx.sourceY
+        dy := ctx.destY
+        h := ctx.height
     else
-        sy := sourceY + clipY - destY
-        h := height - clipY + destY
-        dy := clipY
+        sy := ctx.sourceY + ctx.clipY - ctx.destY
+        h := ctx.height - ctx.clipY + ctx.destY
+        dy := ctx.clipY
     end
-    if ( dy + h ) > ( clipY + clipHeight ) then
-        h := h - ( ( dy + h ) - ( clipY + clipHeight ) )
+    if ( dy + h ) > ( ctx.clipY + ctx.clipHeight ) then
+        h := h - ( ( dy + h ) - ( ctx.clipY + ctx.clipHeight ) )
     end
 
-    if sourceBits = nil then return end
+    if ctx.sourceBits = nil then return end
 
     if sx < 0 then
         dx := dx - sx;
         w := w + sx;
         sx := 0;
     end
-    if ( sx + w ) > sourceBits.pixWidth then
-        w := w - ( sx + w - sourceBits.pixWidth )
+    if ( sx + w ) > ctx.sourceBits.pixWidth then
+        w := w - ( sx + w - ctx.sourceBits.pixWidth )
     end
     if sy < 0 then
         dy := dy - sy
         h := h + sy
         sy := 0
     end
-    if ( sy + h ) > sourceBits.pixHeight then
-        h := h - ( sy + h - sourceBits.pixHeight )
+    if ( sy + h ) > ctx.sourceBits.pixHeight then
+        h := h - ( sy + h - ctx.sourceBits.pixHeight )
     end
   end clipRange
   
@@ -114,9 +112,9 @@ const
   var startBits, endBits: integer
   begin 
     // destBits = destForm bits
-    destRaster := ( ( destBits.pixWidth - 1 ) div 16 ) + 1
-    if sourceBits # nil then
-        sourceRaster := ( ( sourceBits.pixWidth - 1 ) div 16 ) + 1
+    destRaster := ( ( ctx.destBits.pixWidth - 1 ) div 16 ) + 1
+    if ctx.sourceBits # nil then
+        sourceRaster := ( ( ctx.sourceBits.pixWidth - 1 ) div 16 ) + 1
     else
         sourceRaster := 0
     end
@@ -144,7 +142,8 @@ const
   var t: integer
   begin 
     hDir := 1; vDir := 1
-    if (sourceBits # nil) and (destBits # nil) and (sourceBits.buffer = destBits) and (dy >= sy) then
+    if (ctx.sourceBits # nil) and (ctx.destBits # nil) and 
+       (ctx.sourceBits.buffer = ctx.destBits) and (dy >= sy) then
         if dy > sy then
             vDir := -1
             sy := sy + h - 1
@@ -163,7 +162,7 @@ const
   
   procedure calculateOffsets()
   begin 
-    preload := (sourceBits # nil) and (skew # 0) and (skew <= bitand( sx, 15 ) )
+    preload := (ctx.sourceBits # nil) and (skew # 0) and (skew <= bitand( sx, 15 ) )
     if hDir < 0 then preload := preload = false end
     sourceIndex := sy * sourceRaster + ( sx div 16 )
     destIndex := dy * destRaster + ( dx div 16 )
@@ -176,38 +175,39 @@ const
             halftoneWord, mergeWord, word, i, destWord: integer
   begin 
     for i := 1 to h do
-        if halftoneBits # nil then
-            halftoneWord := D.wordAt(halftoneBits, 1 + bitand( dy, 15 ) )
+        if ctx.halftoneBits # nil then
+            halftoneWord := D.wordAt(ctx.halftoneBits, 1 + bitand( dy, 15 ) )
             dy := dy + vDir
         else
             halftoneWord := AllOnes
         end
         skewWord := halftoneWord
-        if preload and (sourceBits # nil) then
-            prevWord := D.wordAt(sourceBits, sourceIndex + 1 )
+        if preload and (ctx.sourceBits # nil) then
+            prevWord := D.wordAt(ctx.sourceBits, sourceIndex + 1 )
             sourceIndex := sourceIndex + hDir
         else
             prevWord := 0
         end
         mergeMask := mask1
         for word := 1 to nWords do
-            if sourceBits # nil then
+            if ctx.sourceBits # nil then
                 prevWord := bitand(prevWord, skewMask)
                 if (word <= sourceRaster) and (sourceIndex >= 0) 
-                        and (sourceIndex < len(sourceBits.buffer) div 2 ) then
-                    thisWord := D.wordAt(sourceBits, sourceIndex + 1 ) 
+                        and (sourceIndex < len(ctx.sourceBits.buffer) div 2 ) then
+                    thisWord := D.wordAt(ctx.sourceBits, sourceIndex + 1 ) 
                 else
                     thisWord := 0
                 end
-                skewWord := bitor( prevWord, bitand( thisWord, not16(skewMask) ) )
+                skewWord := bitor( prevWord, bitand( thisWord, bitnot(skewMask) ) )
                 prevWord := thisWord
-                skewWord := bitor( bitshl( skewWord, skew ), bitshr( skewWord, -( skew - 16 ) ) )
+                skewWord := bitor( bitshl( skewWord, skew ), 
+                                bitshr( skewWord, -( skew - 16 ) ) )
             end
-            if destIndex >= len(destBits.buffer) div 2 then return end
-            destWord := D.wordAt(destBits, destIndex + 1 )
-            mergeWord := merge( combinationRule, bitand(skewWord, halftoneWord), destWord )
-            D.wordAtPut(destBits, destIndex + 1, 
-                bitor( bitand(mergeMask, mergeWord), bitand( not16(mergeMask), destWord ) ) )
+            if destIndex >= len(ctx.destBits.buffer) div 2 then return end
+            destWord := D.wordAt(ctx.destBits, destIndex + 1 )
+            mergeWord := merge( ctx.combinationRule, bitand(skewWord, halftoneWord), destWord )
+            D.wordAtPut(ctx.destBits, destIndex + 1, 
+                bitor( bitand(mergeMask, mergeWord), bitand( bitnot(mergeMask), destWord ) ) )
             sourceIndex := sourceIndex + hDir
             destIndex := destIndex + hDir
             if word = ( nWords - 1 ) then

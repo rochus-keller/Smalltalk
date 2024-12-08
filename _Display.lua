@@ -22,7 +22,6 @@ local ffi = require("ffi")
 local C = ffi.C
 
 ffi.cdef[[
-	typedef uint8_t CharArray[?];
 	
 	int PAL3_init(uint8_t* b, int len, int w, int h);
 	int PAL3_deinit();
@@ -33,6 +32,24 @@ ffi.cdef[[
 	void PAL3_setCursorPos(int x, int y);
 	int PAL3_eventPending();
 	void PAL3_updateArea(int x,int y,int w,int h,int cx,int cy,int cw,int ch);
+	
+	typedef struct Bitmap {
+		uint16_t pixWidth, pixHeight;
+		uint16_t wordLen;
+		uint8_t* buf;
+	}Bitmap;
+	
+	typedef struct Context
+	{
+		const Bitmap* sourceBits; // 0, may be null
+		Bitmap* destBits; // 1
+		const Bitmap* halftoneBits; // 2, may be null
+		int16_t combinationRule; // 3
+		int16_t destX, clipX, clipWidth, sourceX, width; // 4, 5, 6, 7, 8
+		int16_t destY, clipY, clipHeight, sourceY, height; // 9, 10, 11, 12, 13
+	} Context;
+	
+	void BitBlt_copyBits(Context* c);
 ]]
 
 local bitmap
@@ -77,4 +94,35 @@ end
 
 function Display_updateArea(x,y,w,h,cx,cy,cw,ch)
 	C.PAL3_updateArea(x,y,w,h,cx,cy,cw,ch)
+end
+
+local function toBitmap(bm)
+	if bm == nil then return nil end
+	local res = ffi.new( ffi.typeof("Bitmap") )
+	res.pixWidth = bm[0]
+	res.pixHeight = bm[1]
+	res.wordLen = ffi.sizeof(bm[2]) / 2
+	res.buf = bm[2]
+	return res
+end
+
+function Display_copyBits(ctx)
+	local c = ffi.new( ffi.typeof("Context") )
+	
+	c.sourceBits = toBitmap(ctx[0])
+	c.destBits = toBitmap(ctx[1])
+	c.halftoneBits = toBitmap(ctx[2])
+	
+	c.combinationRule = ctx[3]
+	c.destX = ctx[4]
+	c.clipX = ctx[5]
+	c.clipWidth = ctx[6]
+	c.sourceX = ctx[7]
+	c.width = ctx[8]
+	c.destY = ctx[9]
+	c.clipY = ctx[10]
+	c.clipHeight = ctx[11]
+	c.sourceY = ctx[12]
+	c.height = ctx[13]
+	C.BitBlt_copyBits(c)
 end

@@ -949,6 +949,7 @@ bool Interpreter::sendSpecialSelectorBytecode()
     // see array 0x30 specialSelectors
     // "Send Arithmetic Message #%1" ).arg( b & 0xf ), 1 );
     // "Send Special Message #%1" ).arg( b & 0xf ), 1 );
+
     if( !specialSelectorPrimitiveResponse() )
     {
         const quint16 selectorIndex = ( currentBytecode - 176 ) * 2;

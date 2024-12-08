@@ -79,7 +79,7 @@ var    newProcessWaiting : boolean
     cycleNr := 0
     level := 0
     newActiveContext( firstContext() )
-    while D.run and (cycleNr < 121000) do // TEST
+    while D.run do // and (cycleNr < 121000) do // TEST
       // NOTE that this loop segfaults the LuaJIT JIT after ~200k cycles, if
       // neither measure A nor B is present. As soon as either is uncommented,
       // no segfault happens. Also if the JIT is disabled, no segfault happens!
@@ -88,7 +88,7 @@ var    newProcessWaiting : boolean
       
       //if cycleNr mod 1000000 = 0 then print("step ")println(cycleNr) end // (A
       cycle()
-      if (cycleNr mod 1000 = 0) and // (B
+      if (cycleNr mod 100 = 0) and // (B
           D.processEvents() then D.run := false end
       if D.eventPending() then
         sema := OM.getRegister(InputSemaphore)
@@ -2039,7 +2039,7 @@ var    newProcessWaiting : boolean
   
   procedure primitiveCopyBits() 
   var bitblt: OOP; destBits, sourceBits, halftoneBits: D.Bitmap
-      drawToDisp: boolean
+      drawToDisp: boolean; ctx: B.Context
   begin 
     (* Stack:
     9 "<a BitBlt>" // there is always a BitBlt or one of its subclasses top of the stack
@@ -2057,28 +2057,29 @@ var    newProcessWaiting : boolean
     drawToDisp := D.getScreenBitmap().buffer = destBits.buffer
     TRACE_PRIMITIVE( "to disp: " + tostring(drawToDisp) )
 
-    B.destBits := destBits
-    B.sourceBits := sourceBits
-    B.halftoneBits := halftoneBits
-    B.combinationRule := OM.integerValueOf( OM.fetchPointerOfObject(3,bitblt) )
-    B.destX := OM.integerValueOf( OM.fetchPointerOfObject(4,bitblt) )
-    B.destY := OM.integerValueOf( OM.fetchPointerOfObject(5,bitblt) )
-    B.width := OM.integerValueOf( OM.fetchPointerOfObject(6,bitblt) )
-    B.height := OM.integerValueOf( OM.fetchPointerOfObject(7,bitblt) )
-    B.sourceX := OM.integerValueOf( OM.fetchPointerOfObject(8,bitblt) )
-    B.sourceY := OM.integerValueOf( OM.fetchPointerOfObject(9,bitblt) )
-    B.clipX := OM.integerValueOf( OM.fetchPointerOfObject(10,bitblt) )
-    B.clipY := OM.integerValueOf( OM.fetchPointerOfObject(11,bitblt) )
-    B.clipWidth := OM.integerValueOf( OM.fetchPointerOfObject(12,bitblt) )
-    B.clipHeight := OM.integerValueOf( OM.fetchPointerOfObject(13,bitblt) )
+    new(ctx)
+    ctx.destBits := destBits
+    ctx.sourceBits := sourceBits
+    ctx.halftoneBits := halftoneBits
+    ctx.combinationRule := OM.integerValueOf( OM.fetchPointerOfObject(3,bitblt) )
+    ctx.destX := OM.integerValueOf( OM.fetchPointerOfObject(4,bitblt) )
+    ctx.destY := OM.integerValueOf( OM.fetchPointerOfObject(5,bitblt) )
+    ctx.width := OM.integerValueOf( OM.fetchPointerOfObject(6,bitblt) )
+    ctx.height := OM.integerValueOf( OM.fetchPointerOfObject(7,bitblt) )
+    ctx.sourceX := OM.integerValueOf( OM.fetchPointerOfObject(8,bitblt) )
+    ctx.sourceY := OM.integerValueOf( OM.fetchPointerOfObject(9,bitblt) )
+    ctx.clipX := OM.integerValueOf( OM.fetchPointerOfObject(10,bitblt) )
+    ctx.clipY := OM.integerValueOf( OM.fetchPointerOfObject(11,bitblt) )
+    ctx.clipWidth := OM.integerValueOf( OM.fetchPointerOfObject(12,bitblt) )
+    ctx.clipHeight := OM.integerValueOf( OM.fetchPointerOfObject(13,bitblt) )
 
-    // TRAPIF(cycleNr=13152)
-    B.copyBits()
-
-    if true then // drawToDisp then
+    // B.copyBits(ctx)
+    D.copyBits(ctx)
+    
+    if drawToDisp then
       // drawToDisp only one time false at cycle 34837
-      D.updateArea( B.destX, B.destY, B.width, B.height, 
-                                B.clipX, B.clipY, B.clipWidth, B.clipHeight )
+      D.updateArea( ctx.destX, ctx.destY, ctx.width, ctx.height, 
+                                ctx.clipX, ctx.clipY, ctx.clipWidth, ctx.clipHeight )
     end
   end primitiveCopyBits
   
@@ -2119,7 +2120,6 @@ var    newProcessWaiting : boolean
               bitshl(OM.fetchByteOfObject(2,oop), 16) +
               bitshl(OM.fetchByteOfObject(1,oop), 8) +
               OM.fetchByteOfObject(0,oop)
-    TRAP
     ticks := D.getTicks()
     if time - ticks > 0 then
       waitUntil := time
@@ -2131,6 +2131,7 @@ var    newProcessWaiting : boolean
   procedure asynchronousSignal(aSemaphore: OOP)
   begin
     inc(semaphoreIndex)
+    print("semaphoreIndex ")println(semaphoreIndex) // TEST
     semaphoreList[semaphoreIndex] := aSemaphore
   end asynchronousSignal
   

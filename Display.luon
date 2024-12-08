@@ -26,7 +26,14 @@ type
                 pixWidth, pixHeight: integer
                 buffer: array of byte
               end
-    Rect = record x, y, w, h: integer end
+  Context = record
+      sourceBits*: Bitmap
+      destBits*: Bitmap
+      halftoneBits*: Bitmap
+      combinationRule*: integer
+      destX*, clipX*, clipWidth*, sourceX*, width*: integer
+      destY*, clipY*, clipHeight*, sourceY*, height*: integer
+    end
               
 var run* : boolean
 
@@ -40,7 +47,8 @@ var run* : boolean
   procedure getTicks(): integer extern
   procedure close() extern
   procedure eventPending(): boolean extern
-  
+  procedure copyBits*(c: Context) extern
+    
   procedure createBitmap*(bs: array of byte; pixWidth, pixHeight: integer): Bitmap
   var bm: Bitmap; l: integer
   begin
@@ -56,6 +64,7 @@ var run* : boolean
   procedure wordAt*(bm: Bitmap; i: integer): integer
   begin
     dec(i) // Smalltalk array indexes start with 1
+    i := i * 2 // i comes as number of words
     assert(i+1 < len(bm.buffer))
     return bitshl(bm.buffer[i], 8 ) + bm.buffer[i+1]
   end wordAt
@@ -63,6 +72,7 @@ var run* : boolean
   procedure wordAtPut*(bm: Bitmap; i, v: integer)
   begin
     dec(i)
+    i := i * 2 
     assert(i+1 < len(bm.buffer))
     bm.buffer[i] := clip(bitand( bitshr( v, 8 ), 0ffh ))
     bm.buffer[i+1] := clip(bitand( v, 0ffh ))

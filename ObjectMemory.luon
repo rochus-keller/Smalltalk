@@ -84,16 +84,11 @@ const
 type 
       OOP = integer // only 16 bit used
       ByteArray = array of byte
+      Object = record cls: integer; 
+                    isOdd, isPtr, marked: boolean
+                    data: ByteArray
+                end
       
-const
-      HeaderSize = 5
-      ClsMsb = 0
-      ClsLsb = 1
-      OddFlag = 2
-      PtrFlag = 3
-      Marked = 4
-type
-      Object = ByteArray      
 var
       slots : array of Object
       registers : array 10 of integer
@@ -145,7 +140,7 @@ var
         obj := allocate( slotNr, byteLen, cls, isPtr(flags), isOdd(flags) )        
         // copy bytes
         for i := 0 to byteLen-1 do
-          obj[HeaderSize+i] := objectSpace[addr+4+i]
+          obj.data[i] := objectSpace[addr+4+i]
         end
       end
     end readSlot
@@ -209,7 +204,7 @@ var
   end loadFromFile
   
   procedure allocate(slot, numOfBytes: integer; cls: OOP; isPtr, isOdd: boolean): Object
-  var byteLen: integer; ptr: Object
+  var byteLen: integer; obj: Object
   begin 
     // header
     // 1: cls msb
@@ -218,20 +213,20 @@ var
     // 4: isptr
     // ... bytes of object
     assert( (slot < len(slots)) and (slots[slot] = nil) )
-    byteLen := HeaderSize + numOfBytes
-    new(ptr, byteLen) 
-    ptr[OddFlag] := clip(ord(isOdd))
-    ptr[PtrFlag] := clip(ord(isPtr))
-    ptr[Marked] := 0
-    cls := bitshr(cls, 1)
-    writeU16(ptr, ClsMsb, cls)
-    slots[slot] := ptr
-    return ptr
+    byteLen := numOfBytes
+    new(obj) 
+    new(obj.data, byteLen)
+    obj.isOdd := isOdd
+    obj.isPtr := isPtr
+    obj.marked := false
+    obj.cls := bitshr(cls, 1)
+    slots[slot] := obj
+    return obj
   end allocate
   
   procedure getClass(obj: Object): OOP inline
   begin
-    return bitshl(readU16(obj, ClsMsb), 1)
+    return bitshl(obj.cls, 1)
   end getClass
   
   procedure readU32(data: ByteArray; off: integer):integer inline
@@ -264,19 +259,18 @@ var
   end getSlot
   
   procedure fetchClassOf*(objectPointer: OOP): OOP
-  var obj : Object; cls: OOP
+  var obj : Object
   begin
     if isInt(objectPointer) then return classSmallInteger end
     obj := getSlot(objectPointer)
     if obj # nil then 
-      cls := readU16(obj,ClsMsb)
-      return bitshl(cls,1) 
+      return bitshl(obj.cls,1) 
     else return 0 end
   end fetchClassOf
   
   procedure getWordLen(obj: Object): integer inline
   begin
-    return (len(obj) - HeaderSize) div 2
+    return len(obj.data) div 2
   end getWordLen
   
   procedure fetchWordLenghtOf*(objectPointer: OOP): integer 
@@ -303,7 +297,7 @@ var
     if objectPointer = objectNil then return 0 end
     obj := getSlot(objectPointer)
     if obj = nil then return 0 end
-    return readU16( obj, HeaderSize + fieldIndex * 2 )
+    return readU16( obj.data, fieldIndex * 2 )
   end fetchWordOfObject
   
   procedure fetchPointerOfObject*(fieldIndex: integer; objectPointer: OOP): OOP 
@@ -313,7 +307,7 @@ var
     obj := getSlot(objectPointer)
     if obj = nil then return objectNil end
     off := fieldIndex * 2
-    oop := readU16( obj, HeaderSize + off );
+    oop := readU16( obj.data, off );
     if oop = 0 then // BB (implicitly?) assumes that unused members are nil
       return objectNil
     else
@@ -329,7 +323,7 @@ var
     obj := getSlot(objectPointer)
     if obj = nil then return end
     off := fieldIndex * 2
-    writeU16(obj, HeaderSize + off, withValue)
+    writeU16(obj.data, off, withValue)
   end storePointerOfObject
   
   procedure fetchByteOfObject*(byteIndex: integer; objectPointer: OOP): byte 
@@ -339,8 +333,8 @@ var
     obj := getSlot(objectPointer)
     if obj = nil then return 0 end
     off := byteIndex
-    assert( (obj[PtrFlag]=0) and (HeaderSize + off < len(obj) ) )
-    return obj[HeaderSize + off]
+    assert( (not obj.isPtr) and (off < len(obj.data) ) )
+    return obj.data[off]
   end fetchByteOfObject
     
   procedure storeByteOfObject*(byteIndex: integer; objectPointer: OOP; withValue: byte) 
@@ -349,8 +343,8 @@ var
     obj := getSlot(objectPointer)
     if obj = nil then return end
     off := byteIndex
-    assert( (obj[PtrFlag]=0) and (HeaderSize + off < len(obj) ) )
-    obj[HeaderSize + off] := withValue
+    assert( (not obj.isPtr) and (off < len(obj.data) ) )
+    obj.data[off] := withValue
   end storeByteOfObject
   
   procedure storeWordOfObject*(fieldIndex: integer; objectPointer: OOP; withValue: integer) 
@@ -359,7 +353,7 @@ var
     obj := getSlot(objectPointer)
     if obj = nil then return end
     off := fieldIndex * 2
-    writeU16(obj, HeaderSize + off, withValue)
+    writeU16(obj.data, off, withValue)
   end storeWordOfObject
   
   procedure swapPointersOf*(firstPointer, secondPointer: OOP) 
@@ -417,7 +411,7 @@ var
     obj := getSlot(methodPointer)
     if obj = nil then return 0 end    
     assert( getClass(obj) = classCompiledMethod )
-    return getMethodFlags( obj[HeaderSize] )
+    return getMethodFlags( obj.data[0] )
   end flagValueOf
   
   procedure getMethodFlags(data: integer ): integer inline
@@ -439,10 +433,10 @@ var
     obj := getSlot(methodPointer)
     if obj = nil then return 0 end    
     assert( getClass(obj) = classCompiledMethod )
-    flags := getMethodFlags( obj[HeaderSize] )
+    flags := getMethodFlags( obj.data[0] )
     if flags # HeaderExtension then return 0 end
     literalByteCount := getLiteralByteCount(obj)
-    extension := readU16(obj, HeaderSize + methHdrByteLen
+    extension := readU16(obj.data, methHdrByteLen
                               + literalByteCount - 4 ); // next to the last literal
     return bitand(bitshr(extension, 1), 0ffh)
   end primitiveIndexOf
@@ -450,7 +444,7 @@ var
   procedure getLiteralByteCount( obj: Object ): integer inline
 
   begin
-    return 2 * bitand(bitshr(obj[HeaderSize+1], 1), 03fh)
+    return 2 * bitand(bitshr(obj.data[1], 1), 03fh)
   end getLiteralByteCount
   
   procedure literalOfMethod*(index: integer; methodPointer: OOP): OOP 
@@ -461,7 +455,7 @@ var
     assert( getClass(obj) = classCompiledMethod )
     literalByteCount := getLiteralByteCount(obj)
     byteIndex := 2 * index
-    return readU16( obj, HeaderSize + methHdrByteLen + byteIndex )
+    return readU16( obj.data, methHdrByteLen + byteIndex )
   end literalOfMethod
   
   procedure initialInstructionPointerOfMethod*(methodPointer: OOP): integer inline
@@ -492,7 +486,7 @@ var
     obj := getSlot(methodPointer)
     if obj = nil then return 0 end    
     assert( getClass(obj) = classCompiledMethod )
-    flags := getMethodFlags(obj[HeaderSize])
+    flags := getMethodFlags(obj.data[0])
     if flags <= FourArguments then
       return flags
     elsif (flags = ZeroArgPrimitiveReturnSelf) or (flags = ZeroArgPrimitiveReturnVar) then
@@ -500,7 +494,7 @@ var
     end
     assert( flags = HeaderExtension )
     literalByteCount := getLiteralByteCount(obj)
-    extension := readU16( obj, HeaderSize + methHdrByteLen
+    extension := readU16( obj.data, methHdrByteLen
                                        + literalByteCount - 4 ) // next to the last literal
     return bitand(bitshr(extension, 9), 01fh)
   end argumentCountOf
@@ -564,11 +558,11 @@ var
     return (valueWord >= -16384) and (valueWord <= 16383)
   end isIntegerValue
   
-  procedure getByteLen(obj: ByteArray): integer
+  procedure getByteLen(obj: Object): integer
   var res: integer
   begin
-    res := len(obj) - HeaderSize
-    if obj[OddFlag] # 0 then dec(res) end
+    res := len(obj.data) 
+    if obj.isOdd then dec(res) end
     return res
   end getByteLen
   
@@ -578,12 +572,7 @@ var
     if isInt(objectPointer) then return nil end
     obj := getSlot(objectPointer)
     if obj = nil then return nil end
-    s := getByteLen(obj)
-    new(res, s)
-    for i := 0 to s-1 do
-      res[i] := obj[i+HeaderSize]
-    end
-    return res
+    return obj.data
   end fetchByteString
   
   procedure fetchString*(objectPointer: OOP):string
@@ -597,7 +586,7 @@ var
     s := getByteLen(obj) + 1
     new(ba, s)
     for i := 0 to s-2 do
-      c := obj[i+HeaderSize]
+      c := obj.data[i]
       if c = 0h then ba[i] := 20h
       elsif (c <= 01fh) or (c >= 07fh) then ba[i] := 03fh // "?" 
       else ba[i] := c
@@ -693,12 +682,12 @@ var
 
     for i := 0 to len(slots)-1 do
       obj := slots[i]
-      if (obj # nil) and (obj[Marked] = 0) then
+      if (obj # nil) and (not obj.marked) then
         slots[i] := nil
         inc(count)
       end
       if obj # nil then
-        obj[Marked] := 0
+        obj.marked := false
       end
     end
     print("collected ")println(count)
@@ -710,14 +699,13 @@ var
     if (oop = 0) or isInt(oop) then return end
     obj := getSlot(oop)
     if obj = nil then return end // already free
-    if obj[Marked] # 0 then return end // already visited
+    if obj.marked then return end // already visited
 
-    obj[Marked] := 1
+    obj.marked := true
     
-    cls := readU16(obj,ClsMsb)
-    cls := bitshl(cls,1) 
+    cls := bitshl(obj.cls,1) 
 
-    if obj[PtrFlag] # 0 then
+    if obj.isPtr then
       s := getWordLen(obj)
       for i := 0 to s-1 do
         sub := fetchPointerOfObject(i, oop)
