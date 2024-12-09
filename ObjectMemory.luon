@@ -690,7 +690,7 @@ var
         obj.marked := false
       end
     end
-    print("collected ")println(count)
+    // print("collected ")println(count)
   end collectGarbage
   
   procedure mark(oop: OOP)

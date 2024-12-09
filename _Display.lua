@@ -30,7 +30,6 @@ ffi.cdef[[
 	int PAL3_getTime();
 	int PAL3_setCursorBitmap(uint8_t* b, int w, int h);
 	void PAL3_setCursorPos(int x, int y);
-	int PAL3_eventPending();
 	void PAL3_updateArea(int x,int y,int w,int h,int cx,int cy,int cw,int ch);
 	
 	typedef struct Bitmap {
@@ -77,7 +76,7 @@ function Display_getScreenBitmap()
 end
 
 function Display_processEvents()
-	return C.PAL3_processEvents(0) ~= 0
+	return C.PAL3_processEvents(0)
 end
 
 function Display_nextEvent()
@@ -86,10 +85,6 @@ end
 
 function Display_close()
 	C.PAL3_deinit()
-end
-
-function Display_eventPending()
-	return C.PAL3_eventPending() > 0
 end
 
 function Display_updateArea(x,y,w,h,cx,cy,cw,ch)

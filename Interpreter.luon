@@ -57,12 +57,14 @@ const   // MethodContext:
         
         ValueIndex = 1
         
+        semaphoreListLen = 50
+        
 var    newProcessWaiting : boolean
        stackPointer, instructionPointer, argumentCount, primitiveIndex: integer
        success: boolean
        cycleNr, level : integer
        currentBytecode: byte
-       semaphoreList: array 50 of OOP
+       semaphoreList: array semaphoreListLen of OOP
        semaphoreIndex: integer
        toSignal: OOP
        waitUntil : integer
@@ -71,7 +73,43 @@ var    newProcessWaiting : boolean
   procedure interpret*()
   // NOTE: display oop is well known in the original ST-80v2 image (but not otherwise)
   const display = 0340h
-  var ticks: integer; sema: OOP
+  
+    procedure checkEvents()
+    var sema: OOP; pendingEvents: integer
+    begin
+      if true then // (cycleNr mod 10 = 0) then // (B, see below
+        pendingEvents := D.processEvents() 
+        if pendingEvents < 0 then D.run := false end
+      end
+      if pendingEvents > 0 then
+        sema := OM.getRegister(InputSemaphore)
+        if sema # 0 then 
+          //while pendingEvents > 0 do
+            dec(pendingEvents)
+            asynchronousSignal(sema)
+          //end
+        else
+          assert(false)
+        end
+      end
+    end checkEvents
+    
+    procedure checkTimeout()
+    var ticks: integer
+    begin
+      if waitUntil # 0 then
+        ticks := D.getTicks()
+        if waitUntil - ticks <= 0 then 
+          waitUntil := 0
+          print("onTimeout ")println(toSignal) // TEST
+          if toSignal # 0 then
+            asynchronousSignal(toSignal)
+
+          end
+        end
+      end
+    end checkTimeout
+    
   begin
     println("Started Smalltalk interpreter")
     D.run := true
@@ -88,22 +126,8 @@ var    newProcessWaiting : boolean
       
       //if cycleNr mod 1000000 = 0 then print("step ")println(cycleNr) end // (A
       cycle()
-      if (cycleNr mod 100 = 0) and // (B
-          D.processEvents() then D.run := false end
-      if D.eventPending() then
-        sema := OM.getRegister(InputSemaphore)
-        if sema # 0 then 
-          asynchronousSignal(sema)
-        else
-          D.nextEvent()
-        end
-      end
-      if waitUntil # 0 then
-        ticks := D.getTicks()
-        if waitUntil - ticks <= 0 then 
-          onTimeout() 
-        end
-      end
+      checkEvents()
+      checkTimeout()
     end
     D.close()
     println("Finished Smalltalk interpreter")
@@ -1275,6 +1299,8 @@ var    newProcessWaiting : boolean
 
     OM.storeByteOfObject( 0, newLargeInteger, clip(integerValue) )
     OM.storeByteOfObject( 1, newLargeInteger, clip(bitshr(integerValue, 8)) )
+    
+    assert(integerValue=positive16BitValueOf(newLargeInteger))
     return newLargeInteger
   end positive16BitIntegerFor
       
@@ -2030,11 +2056,29 @@ var    newProcessWaiting : boolean
     primitiveFail()
   end primitiveSamleInterval
   
+  var absoluteTimeState : integer
+  
   procedure primitiveInputWord() 
+  var e, et: integer
   begin 
     TRACE_PRIMITIVE("")
     pop(1)
-    push( positive16BitIntegerFor( D.nextEvent() ) )
+    e := D.nextEvent()
+    if e = 0 then push(positive16BitIntegerFor(0)) return end
+    (*
+    if absoluteTimeState = 0 then
+      et := D.getEventType(e)
+      if et = D.AbsoluteTime then 
+        absoluteTimeState := 2 
+      end   
+      print("event ")print(D.getEventName(et))print(" ")
+      print(D.getEventValue(e))print(" pending ")println(pendingEvents)
+    else
+      print("AbsoluteTime word ")println(3-absoluteTimeState)
+      dec(absoluteTimeState)
+    end
+    *)
+    push( positive16BitIntegerFor( e ) )
   end primitiveInputWord
   
   procedure primitiveCopyBits() 
@@ -2130,19 +2174,14 @@ var    newProcessWaiting : boolean
   
   procedure asynchronousSignal(aSemaphore: OOP)
   begin
+    if semaphoreIndex >= semaphoreListLen then
+      println("WARNING semaphore list overflow")
+      return
+    end
     inc(semaphoreIndex)
-    print("semaphoreIndex ")println(semaphoreIndex) // TEST
     semaphoreList[semaphoreIndex] := aSemaphore
   end asynchronousSignal
-  
-  procedure onTimeout()
-  begin // run this when waitUntil - ticks <= 0
-    waitUntil := 0
-    if toSignal # 0 then
-      asynchronousSignal(toSignal)
-    end
-  end onTimeout
-  
+    
   procedure primitiveBeCursor() 
   var cursor: OOP; bitmap: D.Bitmap
   begin 

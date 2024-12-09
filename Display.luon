@@ -37,7 +37,7 @@ type
               
 var run* : boolean
 
-  procedure processEvents*(): boolean extern
+  procedure processEvents*(): integer extern // number of pending events or -1 for finish
   procedure nextEvent(): integer extern
   procedure setCursorPos*(x,y: integer) extern
   procedure setCursorBitmap*(bm: Bitmap) extern 
@@ -46,7 +46,6 @@ var run* : boolean
   procedure updateArea*(x,y,w,h: integer; cx, cy, cw, ch: integer ) extern 
   procedure getTicks(): integer extern
   procedure close() extern
-  procedure eventPending(): boolean extern
   procedure copyBits*(c: Context) extern
     
   procedure createBitmap*(bs: array of byte; pixWidth, pixHeight: integer): Bitmap
@@ -77,5 +76,35 @@ var run* : boolean
     bm.buffer[i] := clip(bitand( bitshr( v, 8 ), 0ffh ))
     bm.buffer[i+1] := clip(bitand( v, 0ffh ))
   end wordAtPut
+  
+const
+  DeltaTime = 0
+  XLocation = 1
+  YLocation = 2
+  BiStateOn = 3
+  BiStateOff = 4
+  AbsoluteTime = 5 // followed by two words
+  
+  procedure getEventType(e: integer): integer inline
+  begin
+    return bitshr(e,12)
+  end getEventType
+  
+  procedure getEventName(t: integer): string inline
+  begin
+    case t of
+    | DeltaTime: return "DeltaTime"
+    | XLocation: return "XLocation"
+    | YLocation: return "YLocation"
+    | BiStateOn: return "BiStateOn"
+    | BiStateOff: return "BiStateOff"
+    | AbsoluteTime: return "AbsoluteTime"
+    end
+  end getEventName
+  
+  procedure getEventValue(e: integer): integer inline
+  begin
+    return bitand(e, 1111_1111_1111b)
+  end getEventValue
 
 end Display
