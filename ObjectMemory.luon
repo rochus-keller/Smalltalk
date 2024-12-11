@@ -201,6 +201,7 @@ var
    
     // TODO
     // updateRefs()
+    return true
   end loadFromFile
   
   procedure allocate(slot, numOfBytes: integer; cls: OOP; isPtr, isOdd: boolean): Object
@@ -857,5 +858,4 @@ begin
   new(slots, bitshr(0ffffh, 1))
   new(registers)
   new(temps)
-  loadFromFile("/home/me/Entwicklung/Modules/Smalltalk/original_image/VirtualImage") // TEST
 end ObjectMemory

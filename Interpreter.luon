@@ -21,7 +21,8 @@
 
 module Interpreter
 
-import OM := ObjectMemory, D := Display, DT := DateTime, I := Input, B := BitBlt, F := Files
+import  OM := ObjectMemory, D := Display, DT := DateTime, I := Input, 
+        B := BitBlt, F := Files, In
 
 type    OOP = OM.OOP
 
@@ -57,7 +58,7 @@ const   // MethodContext:
         
         ValueIndex = 1
         
-        semaphoreListLen = 50
+        semaphoreListLen = 100
         
 var    newProcessWaiting : boolean
        stackPointer, instructionPointer, argumentCount, primitiveIndex: integer
@@ -69,27 +70,28 @@ var    newProcessWaiting : boolean
        toSignal: OOP
        waitUntil : integer
        log: F.File
+       lastUpdate, pendingEvents: integer
 
   procedure interpret*()
   // NOTE: display oop is well known in the original ST-80v2 image (but not otherwise)
   const display = 0340h
   
     procedure checkEvents()
-    var sema: OOP; pendingEvents: integer
+    var sema: OOP; cur: integer
     begin
-      if true then // (cycleNr mod 10 = 0) then // (B, see below
+      cur := D.getTicks()
+      if cur - lastUpdate > 30 then // (B, see below
+        lastUpdate := cur
         pendingEvents := D.processEvents() 
         if pendingEvents < 0 then D.run := false end
       end
       if pendingEvents > 0 then
         sema := OM.getRegister(InputSemaphore)
         if sema # 0 then 
-          //while pendingEvents > 0 do
+          while pendingEvents > 0 do
             dec(pendingEvents)
             asynchronousSignal(sema)
-          //end
-        else
-          assert(false)
+          end
         end
       end
     end checkEvents
@@ -110,8 +112,17 @@ var    newProcessWaiting : boolean
       end
     end checkTimeout
     
+    var args: In.ArgList
   begin
     println("Started Smalltalk interpreter")
+    args := In.Arguments()
+    if (args = nil) or (len(args) # 1) then
+      println("No image provided")
+      return
+    end
+    if not OM.loadFromFile(args[0]) then
+      return
+    end
     D.run := true
     D.setScreenBitmap(fetchBitmap(display)) 
     cycleNr := 0
@@ -2065,7 +2076,8 @@ var    newProcessWaiting : boolean
     pop(1)
     e := D.nextEvent()
     if e = 0 then push(positive16BitIntegerFor(0)) return end
-    (*
+
+    (*// TEST
     if absoluteTimeState = 0 then
       et := D.getEventType(e)
       if et = D.AbsoluteTime then 
@@ -2076,8 +2088,8 @@ var    newProcessWaiting : boolean
     else
       print("AbsoluteTime word ")println(3-absoluteTimeState)
       dec(absoluteTimeState)
-    end
-    *)
+    end*)
+
     push( positive16BitIntegerFor( e ) )
   end primitiveInputWord
   
@@ -2810,6 +2822,4 @@ var    newProcessWaiting : boolean
   
 begin
   new(semaphoreList) semaphoreIndex := -1
-  //log := F.Open("/home/me/Entwicklung/Modules/Smalltalk/original_image/Versteck/CorrelateLogs/luon.log")
-  //if log = nil then println(F.LastError()) end
 end Interpreter

@@ -24,6 +24,8 @@ Update September 2020: Meanwhile I implemented a Smalltalk to Lua and LuaJIT byt
 
 Final conclusion December 2020: With the https://github.com/rochus-keller/Som project I was able to demonstrate that even if the tracing JIT compiler of LuaJIT would support closures, a Smalltalk/SOM implementation based on LuaJIT would still be at least factor 7 slower than a plain Lua on LuaJIT implementation or a Smalltalk implementation based on Cog/Spur (such as e.g. Pharo 7). To achieve the performance of Pharo 7 therefore aggressive optimizations on bytecode and VM level would be required, as it was done in https://github.com/OpenSmalltalk/opensmalltalk-vm over a period of 20 years. 
 
+Update December 2024: I added yet another implementation of the VM, written in the [new Luon programming language](https://github.com/rochus-keller/Luon), which is a statically typed alternative to Lua, also running on LuaJIT.
+
 With this project I could show that a Smalltalk-80 implementation on LuaJIT is feasible and achieves a respectable performance with reasonable effort, but by no means the performance of an implementation like Cog/Spur, which has been optimized over decades. 
 
 

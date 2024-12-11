@@ -1,4 +1,5 @@
 [General]
+Arguments=/home/me/Entwicklung/Modules/Smalltalk/original_image/VirtualImage
 BuildDir=
 BuiltInOakwood=true
 MainModule=@ByteArray(Interpreter)

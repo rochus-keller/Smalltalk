@@ -54,7 +54,7 @@ ffi.cdef[[
 local bitmap
 
 function Display_getTicks()
-	return C.PAL3_getTime() * 1000
+	return C.PAL3_getTime()
 end
 
 -- Bitmap = record pixWidth(0), pixHeight(1): integer; buffer(2): array of byte end
