@@ -61,11 +61,13 @@ Lexer::Token Lexer::next()
         t = nextImp();
         if( t.d_type != Lexer::Comment && t.d_type > Lexer::EoC )
         {
+#ifdef _DEBUG
             if( t.d_line != d_last )
             {
                 d_total++;
                 d_last = t.d_line;
             }
+#endif
         }
     }
 
